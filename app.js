@@ -2509,7 +2509,119 @@ function renderReport(){
       <div class="stat-card"><span class="pill">${esc(r.name)}</span>
       <strong class="${r.net>=0?'positive':'negative'}">${r.net>=0?'+':''}${r.net}</strong>
       <small>${r.count} lượt · cộng ${r.reward} · trừ ${r.cost}${r.pending?` · ${r.pending} chờ`:""}</small></div>`).join(""):'<p class="muted">Chưa có dữ liệu báo cáo.</p>'}`;
+  renderPredictionSummary(entries);
 }
+
+function renderPredictionSummary(entries){
+  const target=$("#predictionSummary");
+  if(!target)return;
+  if(!entries.length){
+    target.innerHTML='<p class="muted">Chưa có dự đoán để tổng hợp.</p>';
+    return;
+  }
+  const byDate=new Map();
+  [...entries].sort((a,b)=>b.date.localeCompare(a.date)).forEach(entry=>{
+    if(!byDate.has(entry.date))byDate.set(entry.date,[]);
+    byDate.get(entry.date).push(entry);
+  });
+  target.innerHTML=`<div class="prediction-summary-list">${[...byDate.entries()].map(([date,dayEntries])=>{
+    const members=visibleMembers().filter(m=>dayEntries.some(e=>e.memberId===m.id));
+    return members.map(member=>{
+      const memberEntries=dayEntries.filter(e=>e.memberId===member.id);
+      const total=aggregate(memberEntries);
+      const net=total.reward-total.cost;
+      const correct=countCorrectPredictions(memberEntries);
+      const summaryRows=buildPredictionSummaryRows(memberEntries);
+      const copyText=summaryRows.map(row=>row.copy).join("\n");
+      return `<article class="prediction-summary-card">
+        <div class="prediction-summary-head">
+          <div><strong>${displayDate(date)}</strong><span>${esc(member.name)}</span></div>
+          <button class="secondary prediction-copy" type="button" data-text="${esc(copyText)}" onclick="copyPredictionSummary(this.dataset.text)">Copy</button>
+        </div>
+        <div class="prediction-summary-metrics">
+          <span>Dự đoán đúng <b>${correct}/${memberEntries.length}</b></span>
+          <span>Trúng <b>${total.hits}</b> lần</span>
+          <span>Điểm trừ <b class="negative">${total.cost}</b></span>
+          <span>Điểm cộng <b class="positive">${total.reward}</b></span>
+          <span>Thành tiền <b class="${net>=0?'positive':'negative'}">${net>=0?'+':''}${net}</b></span>
+        </div>
+        <div class="prediction-lines">${summaryRows.map(renderPredictionSummaryLine).join("")}</div>
+      </article>`;
+    }).join("");
+  }).join("")}</div>`;
+}
+
+function countCorrectPredictions(entries){
+  return entries.reduce((sum,entry)=>{
+    const c=calc(entry);
+    return sum+(c.hits?1:0);
+  },0);
+}
+
+function buildPredictionSummaryRows(entries){
+  const rows=[];
+  const used=new Set();
+  entries.forEach(entry=>{
+    if(used.has(entry.id))return;
+    if(entry.batchId){
+      const group=entries.filter(x=>x.batchId===entry.batchId);
+      group.forEach(x=>used.add(x.id));
+      rows.push(buildPredictionLineRow(group[0].type,group[0].batchLabel||groupNumbersLabel(group),group[0].points,true,group));
+    }
+  });
+  const singles=entries.filter(e=>!used.has(e.id));
+  const grouped=new Map();
+  singles.forEach(entry=>{
+    const key=`${entry.type}|${entry.points}`;
+    if(!grouped.has(key))grouped.set(key,[]);
+    grouped.get(key).push(entry);
+  });
+  [...grouped.values()]
+    .sort((a,b)=>(a[0].type==="lo"?0:1)-(b[0].type==="lo"?0:1)||a[0].points-b[0].points)
+    .forEach(group=>{
+      const numbers=[...new Set(group.map(e=>e.number))].sort().join(" - ");
+      rows.push(buildPredictionLineRow(group[0].type,numbers,group[0].points,false,group));
+    });
+  return rows.sort((a,b)=>(a.type==="lo"?0:1)-(b.type==="lo"?0:1));
+}
+
+function buildPredictionLineRow(type,numbers,points,isBatch,entries){
+  const suffix=type==="lo"?"đ":"k";
+  const total=aggregate(entries);
+  const net=total.reward-total.cost;
+  return {
+    type,
+    numbers,
+    points,
+    copy:`${numbers} ${points}${suffix}`,
+    cost:total.cost,
+    reward:total.reward,
+    net,
+    hits:total.hits,
+    count:entries.length
+  };
+}
+
+function renderPredictionSummaryLine(row){
+  return `<div class="prediction-line">
+    <strong>${esc(row.copy)}</strong>
+    <span>Đúng <b>${row.hits}</b></span>
+    <span>Trừ <b class="negative">${row.cost}</b></span>
+    <span>Cộng <b class="positive">${row.reward}</b></span>
+    <span>Thành tiền <b class="${row.net>=0?'positive':'negative'}">${row.net>=0?'+':''}${row.net}</b></span>
+  </div>`;
+}
+
+async function copyPredictionSummary(text){
+  try{
+    await navigator.clipboard.writeText(text);
+    lastSaveMessage="Đã copy tổng hợp dự đoán.";
+    updateStorageStatus();
+  }catch{
+    prompt("Copy tổng hợp dự đoán",text);
+  }
+}
+window.copyPredictionSummary=copyPredictionSummary;
 
 function renderLeaderboard(){
   const members=visibleMembers();
