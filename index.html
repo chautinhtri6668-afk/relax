@@ -1,0 +1,278 @@
+<!doctype html>
+<html lang="vi">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Sổ điểm vui trong nhà</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header>
+  <div>
+    <h1>Sổ điểm vui</h1>
+    <p>Dán kết quả, ghi số, tự chấm điểm.</p>
+  </div>
+  <div class="head-actions">
+    <span id="storageStatus" class="storage-status">Đang kiểm tra lưu trữ...</span>
+    <form id="adminForm" class="admin-login">
+      <input id="adminPassword" type="password" placeholder="Mật khẩu QTV" autocomplete="current-password">
+      <button type="submit">QTV</button>
+    </form>
+  </div>
+</header>
+
+<main>
+  <section class="notice">
+    <strong>Luật điểm:</strong>
+    Lô: trừ 23, trúng +80 mỗi điểm. Đề: trúng +80 lần điểm ghi.
+  </section>
+
+  <nav class="tabs" aria-label="Chức năng chính">
+    <button class="tab active" type="button" data-tab="predict">Dự đoán</button>
+    <button class="tab" type="button" data-tab="stats">Thống kê</button>
+    <button class="tab" type="button" data-tab="report">Báo cáo</button>
+  </nav>
+
+  <section id="tab-predict" class="tab-panel active">
+    <div class="grid two">
+      <article class="card">
+        <h2>Người chơi</h2>
+        <form id="memberForm" class="inline admin-only">
+          <input id="memberName" maxlength="40" placeholder="Tên thành viên" required>
+          <button>Thêm</button>
+        </form>
+        <div id="memberList"></div>
+      </article>
+
+      <article class="card">
+        <h2>Ghi số</h2>
+        <form id="entryForm" class="entry-form">
+          <label>Ngày<input id="entryDate" type="date" required></label>
+          <label>Thành viên<select id="entryMember" required></select></label>
+          <label>Loại
+            <select id="entryType">
+              <option value="lo">Lô</option>
+              <option value="de">Đề</option>
+            </select>
+          </label>
+          <label>Số chọn<input id="entryNumber" inputmode="numeric" maxlength="2" placeholder="00-99" required></label>
+          <label>Điểm ghi<input id="entryPoints" type="number" min="1" value="1" required></label>
+          <button>Thêm</button>
+        </form>
+        <div class="quick-entry">
+          <label>Nhập nhanh
+            <textarea id="quickEntryText" rows="4" placeholder="62-13 3đ&#10;76-97-50 30k&#10;Đầu 4, 20k&#10;Đầu 2 -7 10k"></textarea>
+          </label>
+          <div class="inline">
+            <button id="quickEntryBtn" type="button" class="secondary">Nhập nhanh</button>
+            <span id="quickEntryStatus" class="muted"></span>
+          </div>
+        </div>
+      </article>
+    </div>
+
+    <section class="card">
+      <div class="section-head">
+        <h2>Sổ dự đoán</h2>
+        <div class="inline">
+          <input id="filterDate" type="date">
+          <button id="clearFilter" class="secondary" type="button">Tất cả</button>
+        </div>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead>
+          <tr>
+            <th>Ngày</th><th>Tổng số đánh</th><th>Tổng điểm dự đoán</th>
+            <th>Số lô đúng</th><th>Số đề đúng</th><th>Điểm trừ</th>
+            <th>Điểm cộng</th><th>Chênh lệch</th><th>Xóa</th>
+          </tr>
+          </thead>
+          <tbody id="summaryBody"></tbody>
+        </table>
+      </div>
+    </section>
+  </section>
+
+  <section id="tab-stats" class="tab-panel">
+    <nav class="subtabs" aria-label="Thống kê kết quả">
+      <button class="subtab active" type="button" data-subtab="results">Kết quả</button>
+      <button class="subtab" type="button" data-subtab="special">Đặc biệt</button>
+      <button class="subtab" type="button" data-subtab="forecast">Dự đoán</button>
+      <button class="subtab" type="button" data-subtab="patterns">Quy luật</button>
+      <button class="subtab" type="button" data-subtab="input">Nhập KQ</button>
+    </nav>
+
+    <section id="stats-results" class="subtab-panel active">
+      <div class="grid two">
+        <article class="card">
+          <div class="section-head">
+            <h2>Theo ngày</h2>
+            <select id="resultSelect" aria-label="Chọn ngày kết quả"></select>
+          </div>
+          <div id="resultPreview"></div>
+        </article>
+
+        <article class="card">
+          <h2>Đầu/đuôi</h2>
+          <div id="headStats"></div>
+        </article>
+      </div>
+
+      <section class="card">
+        <h2>Đã lưu</h2>
+        <div id="resultStats"></div>
+      </section>
+    </section>
+
+    <section id="stats-special" class="subtab-panel">
+      <section class="card">
+        <div class="section-head">
+          <h2>Bảng đặc biệt</h2>
+          <label>Năm
+            <select id="specialYear"></select>
+          </label>
+        </div>
+        <div id="specialStats"></div>
+      </section>
+    </section>
+
+    <section id="stats-forecast" class="subtab-panel">
+      <section class="card">
+        <div class="section-head">
+          <h2>Dự đoán</h2>
+          <label>Năm
+            <select id="patternYear"></select>
+          </label>
+          <label>Ngày so sánh
+            <input id="patternBaseDate" type="date">
+          </label>
+          <label>Cách đánh
+            <select id="referenceMode">
+              <option value="fun">Đánh vui</option>
+              <option value="strong">Kết mạnh</option>
+            </select>
+          </label>
+          <label>Tháng test
+            <input id="referenceBacktestMonth" type="month">
+          </label>
+        </div>
+        <div id="forecastStats"></div>
+      </section>
+    </section>
+
+    <section id="stats-patterns" class="subtab-panel">
+      <section class="card">
+        <div class="section-head">
+          <h2>Quy luật</h2>
+          <label>Năm
+            <select id="lawYear"></select>
+          </label>
+          <label>Ngày so sánh
+            <input id="lawBaseDate" type="date">
+          </label>
+          <label>Cách đánh
+            <select id="lawReferenceMode">
+              <option value="fun">Đánh vui</option>
+              <option value="strong">Kết mạnh</option>
+            </select>
+          </label>
+          <label>Tháng test
+            <input id="lawBacktestMonth" type="month">
+          </label>
+        </div>
+        <div id="patternStats"></div>
+      </section>
+    </section>
+
+    <section id="stats-input" class="subtab-panel">
+      <article class="card">
+        <h2>Nhập kết quả</h2>
+        <form id="resultForm" class="result-form">
+          <label>Ngày<input id="resultDate" type="date" required></label>
+          <label>Giải đặc biệt<input id="specialPrize" inputmode="numeric" maxlength="5" placeholder="Ví dụ 12345" required></label>
+          <label>Toàn bộ giải
+            <textarea id="allPrizes" rows="5" placeholder="12345 67890 11223 ..."></textarea>
+          </label>
+          <label>Ảnh kết quả<input id="resultImage" type="file" accept="image/*"></label>
+          <div id="pasteZone" class="paste-zone" tabindex="0">
+            <strong>Dán ảnh kết quả vào đây</strong>
+            <span>Nhấn Ctrl+V hoặc kéo thả ảnh. Hệ thống sẽ thử đọc số từ ảnh và tự điền kết quả.</span>
+          </div>
+          <div id="ocrStatus" class="ocr-status">Chưa có ảnh để đọc.</div>
+          <button>Lưu kết quả</button>
+        </form>
+      </article>
+    </section>
+  </section>
+
+  <section id="tab-report" class="tab-panel">
+    <section class="card">
+      <div class="section-head">
+        <h2>Báo cáo</h2>
+        <div class="inline">
+          <input id="reportDate" type="date">
+          <button id="clearReportDate" class="secondary" type="button">Tất cả</button>
+        </div>
+      </div>
+      <div id="reportCards" class="report-cards"></div>
+    </section>
+
+    <section class="card">
+      <h2>Xếp hạng</h2>
+      <div id="leaderboard"></div>
+    </section>
+  </section>
+</main>
+
+<footer id="adminPanel" class="admin-panel admin-only">
+  <div class="admin-panel-inner">
+    <div class="section-head">
+      <div>
+        <h2>Quản trị</h2>
+        <p class="muted">Đồng bộ cloud, xuất nhập dữ liệu và cập nhật kết quả.</p>
+      </div>
+      <button id="adminLogout" class="secondary" type="button">Thoát QTV</button>
+    </div>
+    <div class="admin-tools">
+      <button id="exportBtn" class="secondary" type="button">Xuất toàn bộ</button>
+      <button id="exportResultsBtn" class="secondary" type="button">Xuất KQ</button>
+      <button id="importCsvBtn" class="secondary" type="button">Cập nhật CSV</button>
+      <label class="import-label">Nhập file
+        <input id="importFile" type="file" accept=".json">
+      </label>
+    </div>
+    <div class="cloud-form">
+      <h3>Google Sheet Cloud</h3>
+      <div class="cloud-grid">
+        <label>Apps Script Web App URL
+          <input id="cloudUrl" placeholder="https://script.google.com/macros/s/.../exec">
+        </label>
+        <label>Token
+          <input id="cloudToken" type="password" placeholder="Token trong Apps Script">
+        </label>
+      </div>
+      <div class="inline">
+        <button id="saveCloudConfig" type="button">Lưu cấu hình</button>
+        <button id="loadCloudData" class="secondary" type="button">Tải cloud</button>
+        <button id="saveCloudData" class="secondary" type="button">Lưu cloud</button>
+      </div>
+      <p id="cloudStatus" class="muted">Cloud dùng để đồng bộ người chơi, lượt dự đoán và kết quả giữa nhiều máy.</p>
+    </div>
+  </div>
+</footer>
+
+<div id="resultModal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="resultModalTitle">
+  <div class="modal-panel">
+    <div class="modal-head">
+      <h2 id="resultModalTitle">Kết quả</h2>
+      <button id="closeResultModal" class="secondary" type="button">Đóng</button>
+    </div>
+    <div id="resultModalBody"></div>
+  </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
