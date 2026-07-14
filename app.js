@@ -5,6 +5,8 @@ const DB_NAME="so-diem-vui-db";
 const DB_STORE="data";
 const CLOUD_URL_KEY="so-diem-vui-cloud-url";
 const CLOUD_TOKEN_KEY="so-diem-vui-cloud-token";
+const DEFAULT_CLOUD_URL="";
+const DEFAULT_CLOUD_TOKEN="";
 const BACKUP_PREFIX="so-diem-vui-backup-";
 const MAX_BACKUPS=8;
 const REFERENCE_MODE_KEY="so-diem-vui-reference-mode";
@@ -257,8 +259,8 @@ function deferRender(fn,targetSelector){
 }
 function cloudConfig(){
   return {
-    url:localStorage.getItem(CLOUD_URL_KEY)||"",
-    token:localStorage.getItem(CLOUD_TOKEN_KEY)||""
+    url:localStorage.getItem(CLOUD_URL_KEY)||DEFAULT_CLOUD_URL,
+    token:localStorage.getItem(CLOUD_TOKEN_KEY)||DEFAULT_CLOUD_TOKEN
   };
 }
 function applyCloudConfigFromUrl(){
@@ -270,19 +272,10 @@ function applyCloudConfigFromUrl(){
     if(token)localStorage.setItem(CLOUD_TOKEN_KEY,token.trim());
   }catch{}
 }
-function ensureCloudConfig(allowPrompt=false){
-  let cfg=cloudConfig();
+function ensureCloudConfig(){
+  const cfg=cloudConfig();
   if(cfg.url&&cfg.token)return cfg;
-  if(!allowPrompt)return null;
-  const url=cfg.url||prompt("Nhập Apps Script Web App URL", "");
-  if(!url)return null;
-  const token=cfg.token||prompt("Nhập token cloud", "");
-  if(!token)return null;
-  localStorage.setItem(CLOUD_URL_KEY,url.trim());
-  localStorage.setItem(CLOUD_TOKEN_KEY,token.trim());
-  cfg=cloudConfig();
-  if(isAdmin)fillCloudForm();
-  return cfg;
+  return null;
 }
 function appConfig(){
   return {
@@ -371,7 +364,7 @@ function jsonp(url,params={}){
   });
 }
 async function fetchCloudDataForCheck(allowPrompt=false){
-  const cfg=isAdmin?null:ensureCloudConfig(allowPrompt);
+  const cfg=isAdmin?null:ensureCloudConfig();
   if(isAdmin){
     if(!saveCloudConfig())return null;
   }else if(!cfg){
