@@ -340,24 +340,48 @@ function jsonp(url,params={}){
     document.body.appendChild(script);
   });
 }
+async function fetchCloudDataForCheck(){
+  if(!saveCloudConfig())return null;
+  const cfg=cloudConfig();
+  const res=await jsonp(cfg.url,{action:"load",token:cfg.token});
+  if(!res?.ok)throw new Error(res?.error||"Cloud trả về lỗi");
+  if(!res.data)throw new Error("Cloud chưa có dữ liệu");
+  return {data:normalizeState(res.data),updatedAt:res.updatedAt||""};
+}
+async function checkCloudState(){
+  if(!requireAdmin())return;
+  setCloudStatus("Đang kiểm tra cloud...");
+  try{
+    const cloud=await fetchCloudDataForCheck();
+    if(!cloud)return;
+    const message=`Cloud có ${stateStatsText(cloud.data)}${cloud.updatedAt?`, cập nhật ${cloud.updatedAt}`:""}.`;
+    setCloudStatus(message);
+    alert(message);
+  }catch(err){
+    const message=`Kiểm tra cloud lỗi: ${err.message||err}`;
+    setCloudStatus(message,false);
+    alert(message);
+  }
+}
 async function loadCloudState(){
   if(!requireAdmin())return;
-  if(!saveCloudConfig())return;
-  const cfg=cloudConfig();
   setCloudStatus("Đang tải dữ liệu cloud...");
   try{
-    const res=await jsonp(cfg.url,{action:"load",token:cfg.token});
-    if(!res?.ok)throw new Error(res?.error||"Cloud trả về lỗi");
-    if(!res.data)throw new Error("Cloud chưa có dữ liệu");
-    const incoming=normalizeState(res.data);
-    const label=`Cloud${res.updatedAt?` cập nhật ${res.updatedAt}`:""}`;
+    const cloud=await fetchCloudDataForCheck();
+    if(!cloud)return;
+    const incoming=cloud.data;
+    const label=`Cloud${cloud.updatedAt?` cập nhật ${cloud.updatedAt}`:""}`;
     if(!shouldReplaceLocalWith(incoming,label))return;
     makeLocalBackup("before-load-cloud");
     state=incoming;
     save();
-    setCloudStatus(`Đã tải cloud về máy này: ${stateStatsText(state)}.`);
+    const message=`Đã tải cloud về máy này: ${stateStatsText(state)}.`;
+    setCloudStatus(message);
+    alert(message);
   }catch(err){
-    setCloudStatus(`Tải cloud lỗi: ${err.message||err}`,false);
+    const message=`Tải cloud lỗi: ${err.message||err}`;
+    setCloudStatus(message,false);
+    alert(message);
   }
 }
 async function saveCloudState(){
@@ -836,6 +860,7 @@ $("#resultSelect").addEventListener("change",()=>{
 $("#closeResultModal").addEventListener("click",closeResultModal);
 $("#resultModal").addEventListener("click",e=>{if(e.target.id==="resultModal")closeResultModal()});
 $("#saveCloudConfig").addEventListener("click",saveCloudConfig);
+$("#checkCloudData").addEventListener("click",checkCloudState);
 $("#loadCloudData").addEventListener("click",loadCloudState);
 $("#saveCloudData").addEventListener("click",saveCloudState);
 document.addEventListener("keydown",e=>{if(e.key==="Escape")closeResultModal()});
