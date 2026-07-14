@@ -5,6 +5,8 @@ const DB_NAME="so-diem-vui-db";
 const DB_STORE="data";
 const CLOUD_URL_KEY="so-diem-vui-cloud-url";
 const CLOUD_TOKEN_KEY="so-diem-vui-cloud-token";
+const BACKUP_PREFIX="so-diem-vui-backup-";
+const MAX_BACKUPS=8;
 const REFERENCE_MODE_KEY="so-diem-vui-reference-mode";
 const REFERENCE_MONTH_KEY="so-diem-vui-reference-month";
 const LAW_MODE_KEY="so-diem-vui-law-mode";
@@ -54,6 +56,80 @@ function normalizeState(data){
     results:[...resultsByDate.values()],
     entries:Array.isArray(safe.entries)?safe.entries:[]
   };
+}
+
+function stateStats(data){
+  const safe=normalizeState(data);
+  return {
+    members:safe.members.length,
+    entries:safe.entries.length,
+    results:safe.results.length
+  };
+}
+
+function stateStatsText(data){
+  const s=stateStats(data);
+  return `${s.members} người chơi, ${s.entries} lượt dự đoán, ${s.results} ngày kết quả`;
+}
+
+function hasPlayerData(data){
+  const s=stateStats(data);
+  return s.members>0||s.entries>0;
+}
+
+function makeLocalBackup(reason="backup"){
+  try{
+    const key=`${BACKUP_PREFIX}${Date.now()}`;
+    localStorage.setItem(key,JSON.stringify({
+      reason,
+      createdAt:new Date().toISOString(),
+      data:normalizeState(state)
+    }));
+    pruneBackups();
+    return key;
+  }catch{
+    return "";
+  }
+}
+
+function listBackups(){
+  const items=[];
+  for(let i=0;i<localStorage.length;i++){
+    const key=localStorage.key(i);
+    if(key&&key.startsWith(BACKUP_PREFIX)){
+      try{
+        const item=JSON.parse(localStorage.getItem(key)||"{}");
+        items.push({key,...item});
+      }catch{}
+    }
+  }
+  return items.sort((a,b)=>String(b.createdAt||"").localeCompare(String(a.createdAt||"")));
+}
+
+function pruneBackups(){
+  listBackups().slice(MAX_BACKUPS).forEach(item=>localStorage.removeItem(item.key));
+}
+
+function restoreLatestBackup(){
+  if(!requireAdmin())return;
+  const backup=listBackups()[0];
+  if(!backup?.data){alert("Chưa có backup nội bộ để khôi phục.");return}
+  const created=backup.createdAt?new Date(backup.createdAt).toLocaleString("vi-VN"):"không rõ thời gian";
+  if(!confirm(`Khôi phục backup ${created} (${stateStatsText(backup.data)}) và ghi đè dữ liệu máy này?`))return;
+  makeLocalBackup("before-restore-backup");
+  state=normalizeState(backup.data);
+  save();
+  alert(`Đã khôi phục backup: ${stateStatsText(state)}.`);
+}
+
+function shouldReplaceLocalWith(incoming,sourceLabel){
+  const currentHasPlayers=hasPlayerData(state);
+  const incomingHasPlayers=hasPlayerData(incoming);
+  if(currentHasPlayers&&!incomingHasPlayers){
+    alert(`${sourceLabel} không có dữ liệu người chơi/lượt dự đoán (${stateStatsText(incoming)}), nên app không ghi đè dữ liệu máy này.\n\nNếu muốn chỉ lấy kết quả, hãy dùng Cập nhật CSV hoặc nhập file kết quả riêng.`);
+    return false;
+  }
+  return confirm(`${sourceLabel}: ${stateStatsText(incoming)}.\nDữ liệu máy này: ${stateStatsText(state)}.\n\nGhi đè dữ liệu máy này?`);
 }
 
 function buildStateCache(data){
@@ -228,10 +304,13 @@ async function loadCloudState(){
     const res=await jsonp(cfg.url,{action:"load",token:cfg.token});
     if(!res?.ok)throw new Error(res?.error||"Cloud trả về lỗi");
     if(!res.data)throw new Error("Cloud chưa có dữ liệu");
-    if(!confirm(`Tải dữ liệu cloud${res.updatedAt?` cập nhật ${res.updatedAt}`:""} và ghi đè dữ liệu máy này?`))return;
-    state=normalizeState(res.data);
+    const incoming=normalizeState(res.data);
+    const label=`Cloud${res.updatedAt?` cập nhật ${res.updatedAt}`:""}`;
+    if(!shouldReplaceLocalWith(incoming,label))return;
+    makeLocalBackup("before-load-cloud");
+    state=incoming;
     save();
-    setCloudStatus("Đã tải cloud về máy này.");
+    setCloudStatus(`Đã tải cloud về máy này: ${stateStatsText(state)}.`);
   }catch(err){
     setCloudStatus(`Tải cloud lỗi: ${err.message||err}`,false);
   }
@@ -239,7 +318,9 @@ async function loadCloudState(){
 async function saveCloudState(){
   if(!requireAdmin())return;
   if(!saveCloudConfig())return;
-  if(!confirm("Lưu dữ liệu máy này lên cloud và ghi đè bản cloud hiện tại?"))return;
+  if(!hasPlayerData(state)){
+    if(!confirm(`Máy này chưa có người chơi/lượt dự đoán (${stateStatsText(state)}). Vẫn lưu lên cloud và ghi đè bản cloud hiện tại?`))return;
+  }else if(!confirm(`Lưu dữ liệu máy này lên cloud (${stateStatsText(state)}) và ghi đè bản cloud hiện tại?`))return;
   const cfg=cloudConfig();
   setCloudStatus("Đang gửi dữ liệu lên cloud...");
   try{
@@ -249,7 +330,7 @@ async function saveCloudState(){
       headers:{"Content-Type":"text/plain;charset=utf-8"},
       body:JSON.stringify({action:"save",token:cfg.token,data:state})
     });
-    setCloudStatus("Đã gửi dữ liệu lên cloud. Bấm Tải cloud ở máy khác để lấy về.");
+    setCloudStatus(`Đã gửi dữ liệu lên cloud: ${stateStatsText(state)}. Bấm Tải cloud ở máy khác để lấy về.`);
   }catch(err){
     setCloudStatus(`Lưu cloud lỗi: ${err.message||err}`,false);
   }
@@ -782,9 +863,23 @@ $("#importFile").addEventListener("change",e=>{
   if(!requireAdmin()){e.target.value="";return}
   const f=e.target.files[0]; if(!f)return;
   const rd=new FileReader();
-  rd.onload=()=>{try{state=JSON.parse(rd.result);save()}catch{alert("File dữ liệu không hợp lệ.")}};
+  rd.onload=()=>{
+    try{
+      const incoming=normalizeState(JSON.parse(rd.result));
+      if(!shouldReplaceLocalWith(incoming,`File ${f.name}`))return;
+      makeLocalBackup("before-import-file");
+      state=incoming;
+      save();
+      alert(`Đã nhập file: ${stateStatsText(state)}.`);
+    }catch{
+      alert("File dữ liệu không hợp lệ.");
+    }finally{
+      e.target.value="";
+    }
+  };
   rd.readAsText(f);
 });
+$("#restoreBackupBtn").addEventListener("click",restoreLatestBackup);
 
 function calc(entry){
   const r=resultForDate(entry.date);
