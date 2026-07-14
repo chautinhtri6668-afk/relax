@@ -41,6 +41,7 @@ const today=()=>localDate(new Date());
 const addDays=n=>{const d=new Date();d.setDate(d.getDate()+n);return localDate(d)};
 const yesterday=()=>addDays(-1);
 $("#resultDate").value=today(); $("#entryDate").value=today();
+applyCloudConfigFromUrl();
 $("#referenceMode").value=localStorage.getItem(REFERENCE_MODE_KEY)||"fun";
 $("#referenceBacktestMonth").value=localStorage.getItem(REFERENCE_MONTH_KEY)||today().slice(0,7);
 $("#lawReferenceMode").value=localStorage.getItem(LAW_MODE_KEY)||"fun";
@@ -260,6 +261,29 @@ function cloudConfig(){
     token:localStorage.getItem(CLOUD_TOKEN_KEY)||""
   };
 }
+function applyCloudConfigFromUrl(){
+  try{
+    const params=new URLSearchParams(location.search);
+    const url=params.get("cloudUrl")||params.get("cloud_url");
+    const token=params.get("cloudToken")||params.get("token");
+    if(url)localStorage.setItem(CLOUD_URL_KEY,url.trim());
+    if(token)localStorage.setItem(CLOUD_TOKEN_KEY,token.trim());
+  }catch{}
+}
+function ensureCloudConfig(allowPrompt=false){
+  let cfg=cloudConfig();
+  if(cfg.url&&cfg.token)return cfg;
+  if(!allowPrompt)return null;
+  const url=cfg.url||prompt("Nhập Apps Script Web App URL", "");
+  if(!url)return null;
+  const token=cfg.token||prompt("Nhập token cloud", "");
+  if(!token)return null;
+  localStorage.setItem(CLOUD_URL_KEY,url.trim());
+  localStorage.setItem(CLOUD_TOKEN_KEY,token.trim());
+  cfg=cloudConfig();
+  if(isAdmin)fillCloudForm();
+  return cfg;
+}
 function appConfig(){
   return {
     cloudUrl:localStorage.getItem(CLOUD_URL_KEY)||"",
@@ -346,10 +370,15 @@ function jsonp(url,params={}){
     document.body.appendChild(script);
   });
 }
-async function fetchCloudDataForCheck(){
-  if(!saveCloudConfig())return null;
-  const cfg=cloudConfig();
-  const res=await jsonp(cfg.url,{action:"load",token:cfg.token});
+async function fetchCloudDataForCheck(allowPrompt=false){
+  const cfg=isAdmin?null:ensureCloudConfig(allowPrompt);
+  if(isAdmin){
+    if(!saveCloudConfig())return null;
+  }else if(!cfg){
+    throw new Error("Chưa có cấu hình cloud. Cần link có cloudUrl/token hoặc nhập URL + token.");
+  }
+  const finalCfg=isAdmin?cloudConfig():cfg;
+  const res=await jsonp(finalCfg.url,{action:"load",token:finalCfg.token});
   if(!res?.ok)throw new Error(res?.error||"Cloud trả về lỗi");
   if(!res.data)throw new Error("Cloud chưa có dữ liệu");
   return {data:normalizeState(res.data),updatedAt:res.updatedAt||""};
@@ -358,7 +387,7 @@ async function checkCloudState(){
   if(!requireAdmin())return;
   setCloudStatus("Đang kiểm tra cloud...");
   try{
-    const cloud=await fetchCloudDataForCheck();
+    const cloud=await fetchCloudDataForCheck(false);
     if(!cloud)return;
     const message=`Cloud có ${stateStatsText(cloud.data)}${cloud.updatedAt?`, cập nhật ${cloud.updatedAt}`:""}.`;
     setCloudStatus(message);
@@ -373,7 +402,7 @@ async function loadCloudState(){
   if(!requireAdmin())return;
   setCloudStatus("Đang tải dữ liệu cloud...");
   try{
-    const cloud=await fetchCloudDataForCheck();
+    const cloud=await fetchCloudDataForCheck(false);
     if(!cloud)return;
     const incoming=cloud.data;
     const label=`Cloud${cloud.updatedAt?` cập nhật ${cloud.updatedAt}`:""}`;
@@ -382,6 +411,28 @@ async function loadCloudState(){
     state=incoming;
     save();
     const message=`Đã tải cloud về máy này: ${stateStatsText(state)}.`;
+    setCloudStatus(message);
+    alert(message);
+  }catch(err){
+    const message=`Tải cloud lỗi: ${err.message||err}`;
+    setCloudStatus(message,false);
+    alert(message);
+  }
+}
+async function loadCloudForPlayer(){
+  setCloudStatus("Đang tải cloud...");
+  try{
+    const cloud=await fetchCloudDataForCheck(true);
+    if(!cloud)return;
+    const incoming=cloud.data;
+    const label=`Cloud${cloud.updatedAt?` cập nhật ${cloud.updatedAt}`:""}`;
+    if(!shouldReplaceLocalWith(incoming,label))return;
+    makeLocalBackup("before-player-load-cloud");
+    state=incoming;
+    currentPlayerId="";
+    sessionStorage.removeItem("so-diem-vui-player");
+    save();
+    const message=`Đã tải cloud: ${stateStatsText(state)}. Chọn tên người chơi rồi nhập mật khẩu để vào.`;
     setCloudStatus(message);
     alert(message);
   }catch(err){
@@ -408,6 +459,23 @@ async function saveCloudState(){
     setCloudStatus(`Đã gửi dữ liệu lên cloud: ${stateStatsText(state)}. Bấm Tải cloud ở máy khác để lấy về.`);
   }catch(err){
     setCloudStatus(`Lưu cloud lỗi: ${err.message||err}`,false);
+  }
+}
+async function copyPlayerCloudLink(){
+  if(!requireAdmin())return;
+  if(!saveCloudConfig())return;
+  const cfg=cloudConfig();
+  const url=new URL(location.href);
+  url.hash="";
+  url.searchParams.set("cloudUrl",cfg.url);
+  url.searchParams.set("token",cfg.token);
+  const link=url.toString();
+  try{
+    await navigator.clipboard.writeText(link);
+    setCloudStatus("Đã copy link người chơi. Gửi link này để người chơi bấm Tải cloud.");
+    alert("Đã copy link người chơi.");
+  }catch{
+    prompt("Copy link này gửi cho người chơi",link);
   }
 }
 async function sha256(text){
@@ -448,9 +516,19 @@ function requirePlayerOrAdmin(){
 }
 function renderAdminState(){
   $$(".admin-only").forEach(el=>el.classList.toggle("admin-hidden",!isAdmin));
+  enforceAdminOnlySubtabs();
   $("#adminForm").classList.toggle("admin-hidden",isAdmin);
   if(isAdmin)fillCloudForm();
   renderPlayerSession();
+}
+function enforceAdminOnlySubtabs(){
+  if(!isAdmin&&$(".subtab.active")?.dataset.subtab==="patterns"){
+    const fallback=$('.subtab[data-subtab="results"]');
+    fallback?.classList.add("active");
+    $('.subtab[data-subtab="patterns"]')?.classList.remove("active");
+    $("#stats-patterns")?.classList.remove("active");
+    $("#stats-results")?.classList.add("active");
+  }
 }
 function renderPlayerSession(){
   const me=currentPlayer();
@@ -965,6 +1043,8 @@ $("#saveCloudConfig").addEventListener("click",saveCloudConfig);
 $("#checkCloudData").addEventListener("click",checkCloudState);
 $("#loadCloudData").addEventListener("click",loadCloudState);
 $("#saveCloudData").addEventListener("click",saveCloudState);
+$("#copyPlayerLink").addEventListener("click",copyPlayerCloudLink);
+$("#playerLoadCloud").addEventListener("click",loadCloudForPlayer);
 document.addEventListener("keydown",e=>{if(e.key==="Escape")closeResultModal()});
 
 const pasteZone=$("#pasteZone");
@@ -2449,6 +2529,7 @@ function renderLeaderboard(){
 }
 
 function render(){
+  enforceAdminOnlySubtabs();
   const activeTab=$(".tab.active")?.dataset.tab||"predict";
   const activeSubtab=$(".subtab.active")?.dataset.subtab||"results";
   if(activeTab==="predict"){

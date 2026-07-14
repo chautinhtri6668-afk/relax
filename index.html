@@ -13,13 +13,14 @@
     <p>Theo dõi, dự đoán, thống kê, báo cáo số học.</p>
   </div>
   <div class="head-actions">
-    <span id="storageStatus" class="storage-status">Đang kiểm tra lưu trữ...</span>
     <form id="playerLoginForm" class="player-login">
+      <button id="playerLoadCloud" class="secondary" type="button">Tải cloud</button>
       <select id="playerLoginMember" aria-label="Người chơi"></select>
       <input id="playerLoginPassword" type="password" placeholder="Mật khẩu người chơi" autocomplete="current-password">
       <button type="submit">Vào</button>
     </form>
     <div id="playerSession" class="session-chip hidden"></div>
+    <span id="storageStatus" class="storage-status">Đang kiểm tra lưu trữ...</span>
   </div>
 </header>
 
@@ -107,7 +108,7 @@
       <button class="subtab active" type="button" data-subtab="results">Kết quả</button>
       <button class="subtab" type="button" data-subtab="special">Đặc biệt</button>
       <button class="subtab" type="button" data-subtab="forecast">Dự đoán</button>
-      <button class="subtab" type="button" data-subtab="patterns">Quy luật</button>
+      <button class="subtab admin-only" type="button" data-subtab="patterns">Quy luật</button>
       <button class="subtab" type="button" data-subtab="input">Nhập KQ</button>
     </nav>
 
@@ -169,7 +170,7 @@
       </section>
     </section>
 
-    <section id="stats-patterns" class="subtab-panel">
+    <section id="stats-patterns" class="subtab-panel admin-only">
       <section class="card">
         <div class="section-head">
           <h2>Quy luật</h2>
@@ -277,6 +278,7 @@
         <button id="checkCloudData" class="secondary" type="button">Kiểm tra cloud</button>
         <button id="loadCloudData" class="secondary" type="button">Tải cloud</button>
         <button id="saveCloudData" class="secondary" type="button">Lưu cloud</button>
+        <button id="copyPlayerLink" class="secondary" type="button">Copy link người chơi</button>
       </div>
       <p id="cloudStatus" class="muted">Cloud dùng để đồng bộ người chơi, lượt dự đoán và kết quả giữa nhiều máy.</p>
     </div>
