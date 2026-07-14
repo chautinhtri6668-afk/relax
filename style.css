@@ -196,23 +196,29 @@ small,.muted{color:var(--muted)}
 
 @media(max-width:640px){
   body{font-size:14px;background:#f4f7f7}
-  header{padding:14px 12px;gap:10px;align-items:stretch}
-  header h1{font-size:22px;margin-bottom:2px}
-  header p{font-size:13px}
+  header{position:static;padding:9px 10px;gap:8px;align-items:stretch}
+  header h1{font-size:20px;margin-bottom:0}
+  header p{display:none}
+  .brand-block{gap:6px;min-width:0}
   .head-actions{width:100%;gap:6px}
   .storage-status{order:2;width:100%;text-align:center;justify-content:center;border-radius:8px}
-  .head-actions .storage-status{text-align:left;border:0;border-radius:0;padding:0}
+  .head-actions .storage-status{text-align:left;border:0;border-radius:0;padding:0;font-size:11px;line-height:1.25}
   .admin-login,.player-login{width:100%;display:grid;grid-template-columns:1fr auto}
-  .player-login{grid-template-columns:auto 1fr 1fr auto}
+  .player-login{grid-template-columns:1fr 1fr 1fr}
+  #playerLoadCloud{grid-column:1/2}
+  #playerLoginMember{grid-column:2/4}
+  #playerLoginPassword{grid-column:1/3}
+  #jumpAdminLogin{grid-column:3/4}
   .admin-login input,.player-login input,.player-login select{width:100%;min-width:0}
+  .player-login button,.player-login input,.player-login select{padding:6px 7px;font-size:12px}
   .admin-login-box{align-items:center;flex-direction:column;padding:12px;max-width:none}
   .admin-login-box .admin-login{width:100%}
   .session-chip{width:100%;justify-content:space-between;border-radius:8px}
   main{margin:12px auto;padding:0 10px 24px}
   .notice,.card{padding:12px;margin-bottom:10px;border-radius:8px;box-shadow:0 4px 12px rgba(15,23,42,.05)}
   .notice{font-size:13px}
-  .tabs{display:flex;overflow-x:auto;gap:6px;padding:5px;border-radius:10px;scroll-snap-type:x mandatory}
-  .tab{min-width:104px;flex:1 0 104px;padding:8px;font-size:13px;scroll-snap-align:start}
+  .tabs{display:flex;overflow-x:auto;gap:5px;padding:4px;border-radius:9px;scroll-snap-type:x mandatory;box-shadow:none}
+  .tab{min-width:88px;flex:1 0 88px;padding:7px 8px;font-size:12px;scroll-snap-align:start}
   .subtabs{gap:6px;padding:5px;border-radius:9px}
   .subtab{padding:7px 9px;font-size:13px}
   label{font-size:13px}
@@ -234,9 +240,10 @@ small,.muted{color:var(--muted)}
   .prediction-summary-metrics{grid-template-columns:repeat(2,1fr)}
   .prediction-line{grid-template-columns:1fr 1fr}
   .prediction-line strong{grid-column:1/-1}
-  .table-wrap{border:1px solid var(--line);border-radius:8px}
-  .table-wrap table{min-width:760px}
-  .table-wrap th,.table-wrap td{padding:7px 8px;font-size:12px}
+  .table-wrap{border:1px solid var(--line);border-radius:8px;-webkit-overflow-scrolling:touch;position:relative}
+  .table-wrap::before{content:"Kéo ngang để xem đủ bảng";position:sticky;left:0;display:block;width:max-content;padding:5px 8px;color:#64748b;background:#f8fafc;border-right:1px solid var(--line);border-bottom:1px solid var(--line);font-size:11px;font-weight:800;z-index:3}
+  .table-wrap table{min-width:720px}
+  .table-wrap th,.table-wrap td{padding:6px 7px;font-size:12px}
   .detail-table{min-width:760px}
   .stat-card{padding:11px;border-top-width:3px}
   .stat-card strong{font-size:20px}
