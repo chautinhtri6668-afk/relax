@@ -254,6 +254,51 @@ function cloudConfig(){
     token:localStorage.getItem(CLOUD_TOKEN_KEY)||""
   };
 }
+function appConfig(){
+  return {
+    cloudUrl:localStorage.getItem(CLOUD_URL_KEY)||"",
+    cloudToken:localStorage.getItem(CLOUD_TOKEN_KEY)||"",
+    referenceMode:localStorage.getItem(REFERENCE_MODE_KEY)||$("#referenceMode")?.value||"fun",
+    referenceMonth:localStorage.getItem(REFERENCE_MONTH_KEY)||$("#referenceBacktestMonth")?.value||today().slice(0,7),
+    lawMode:localStorage.getItem(LAW_MODE_KEY)||$("#lawReferenceMode")?.value||"fun",
+    lawMonth:localStorage.getItem(LAW_MONTH_KEY)||$("#lawBacktestMonth")?.value||today().slice(0,7)
+  };
+}
+function applyAppConfig(config={}){
+  if(config.cloudUrl!==undefined)localStorage.setItem(CLOUD_URL_KEY,String(config.cloudUrl||""));
+  if(config.cloudToken!==undefined)localStorage.setItem(CLOUD_TOKEN_KEY,String(config.cloudToken||""));
+  if(config.referenceMode)localStorage.setItem(REFERENCE_MODE_KEY,config.referenceMode);
+  if(config.referenceMonth)localStorage.setItem(REFERENCE_MONTH_KEY,config.referenceMonth);
+  if(config.lawMode)localStorage.setItem(LAW_MODE_KEY,config.lawMode);
+  if(config.lawMonth)localStorage.setItem(LAW_MONTH_KEY,config.lawMonth);
+  if($("#referenceMode"))$("#referenceMode").value=localStorage.getItem(REFERENCE_MODE_KEY)||"fun";
+  if($("#referenceBacktestMonth"))$("#referenceBacktestMonth").value=localStorage.getItem(REFERENCE_MONTH_KEY)||today().slice(0,7);
+  if($("#lawReferenceMode"))$("#lawReferenceMode").value=localStorage.getItem(LAW_MODE_KEY)||"fun";
+  if($("#lawBacktestMonth"))$("#lawBacktestMonth").value=localStorage.getItem(LAW_MONTH_KEY)||today().slice(0,7);
+  if(isAdmin)fillCloudForm();
+}
+function exportDataPackage(){
+  touchState();
+  return {
+    schema:"so-diem-vui-data-v1",
+    exportedAt:new Date().toISOString(),
+    config:appConfig(),
+    data:normalizeState(state)
+  };
+}
+function unpackImportedData(raw){
+  const parsed=JSON.parse(raw);
+  if(parsed?.schema==="so-diem-vui-data-v1"){
+    return {data:normalizeState(parsed.data),config:parsed.config||{},label:"Gói data"};
+  }
+  if(parsed?.members||parsed?.entries||parsed?.results){
+    return {data:normalizeState(parsed),config:null,label:"File dữ liệu cũ"};
+  }
+  if(parsed?.data&&(parsed.data.members||parsed.data.entries||parsed.data.results)){
+    return {data:normalizeState(parsed.data),config:parsed.config||null,label:"File data"};
+  }
+  throw new Error("File không có dữ liệu app");
+}
 function setCloudStatus(message,ok=true){
   const el=$("#cloudStatus");
   if(el){
@@ -829,7 +874,17 @@ function downloadJson(data,filename){
 
 $("#exportBtn").addEventListener("click",()=>{
   if(!requireAdmin())return;
-  downloadJson(state,`so-diem-vui-${today()}.json`);
+  const pack=exportDataPackage();
+  makeLocalBackup("export-full-data");
+  downloadJson(pack,`so-diem-vui-data-${today()}.json`);
+  alert(`Đã export data: ${stateStatsText(pack.data)}. File này có cả cấu hình cloud/mode test.`);
+});
+$("#exportDataBtn").addEventListener("click",()=>{
+  if(!requireAdmin())return;
+  const pack=exportDataPackage();
+  makeLocalBackup("export-data");
+  downloadJson(pack,`so-diem-vui-data-${today()}.json`);
+  alert(`Đã export data: ${stateStatsText(pack.data)}. File này có cả cấu hình cloud/mode test.`);
 });
 $("#exportResultsBtn").addEventListener("click",()=>{
   if(!requireAdmin())return;
@@ -859,18 +914,41 @@ $("#importCsvBtn").addEventListener("click",async()=>{
     btn.textContent=oldText;
   }
 });
+$("#importDataFile").addEventListener("change",e=>{
+  if(!requireAdmin()){e.target.value="";return}
+  const f=e.target.files[0]; if(!f)return;
+  const rd=new FileReader();
+  rd.onload=()=>{
+    try{
+      const pack=unpackImportedData(rd.result);
+      if(!shouldReplaceLocalWith(pack.data,`${pack.label} ${f.name}`))return;
+      makeLocalBackup("before-import-data");
+      state=pack.data;
+      if(pack.config)applyAppConfig(pack.config);
+      save();
+      alert(`Đã import data: ${stateStatsText(state)}${pack.config?" và cấu hình.":"."}`);
+    }catch(err){
+      alert(`File data không hợp lệ: ${err.message||err}`);
+    }finally{
+      e.target.value="";
+    }
+  };
+  rd.readAsText(f);
+});
 $("#importFile").addEventListener("change",e=>{
   if(!requireAdmin()){e.target.value="";return}
   const f=e.target.files[0]; if(!f)return;
   const rd=new FileReader();
   rd.onload=()=>{
     try{
-      const incoming=normalizeState(JSON.parse(rd.result));
-      if(!shouldReplaceLocalWith(incoming,`File ${f.name}`))return;
+      const pack=unpackImportedData(rd.result);
+      const incoming=pack.data;
+      if(!shouldReplaceLocalWith(incoming,`${pack.label} ${f.name}`))return;
       makeLocalBackup("before-import-file");
       state=incoming;
+      if(pack.config)applyAppConfig(pack.config);
       save();
-      alert(`Đã nhập file: ${stateStatsText(state)}.`);
+      alert(`Đã nhập file: ${stateStatsText(state)}${pack.config?" và cấu hình.":"."}`);
     }catch{
       alert("File dữ liệu không hợp lệ.");
     }finally{
