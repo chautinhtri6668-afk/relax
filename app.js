@@ -368,7 +368,7 @@ async function fetchCloudDataForCheck(allowPrompt=false){
   if(isAdmin){
     if(!saveCloudConfig())return null;
   }else if(!cfg){
-    throw new Error("Chưa có cấu hình cloud. Cần link có cloudUrl/token hoặc nhập URL + token.");
+    throw new Error("Chưa có cấu hình cloud. Hãy mở đúng link người chơi do QTV gửi, hoặc nhờ QTV lưu sẵn cloud trong app.");
   }
   const finalCfg=isAdmin?cloudConfig():cfg;
   const res=await jsonp(finalCfg.url,{action:"load",token:finalCfg.token});
