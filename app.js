@@ -1032,6 +1032,7 @@ $("#resultSelect").addEventListener("change",()=>{
 });
 $("#closeResultModal").addEventListener("click",closeResultModal);
 $("#resultModal").addEventListener("click",e=>{if(e.target.id==="resultModal")closeResultModal()});
+$(".modal-panel").addEventListener("click",e=>e.stopPropagation());
 $("#saveCloudConfig").addEventListener("click",saveCloudConfig);
 $("#checkCloudData").addEventListener("click",checkCloudState);
 $("#loadCloudData").addEventListener("click",loadCloudState);
@@ -1483,8 +1484,10 @@ function showResultModal(date){
 
 function closeResultModal(){
   $("#resultModal").classList.add("hidden");
+  $("#resultModalBody").innerHTML="";
 }
 window.showResultModal=showResultModal;
+window.closeResultModal=closeResultModal;
 
 function renderModalHeadTable(result){
   const special=two(result.special);
