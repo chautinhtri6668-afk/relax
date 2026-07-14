@@ -27,6 +27,7 @@ let deferredRenderId=0;
 let pastedImage="";
 let ocrRun=0;
 let isAdmin=sessionStorage.getItem("so-diem-vui-admin")==="1";
+let currentPlayerId=sessionStorage.getItem("so-diem-vui-player")||"";
 const ADMIN_HASH="e6121f114d1b02a340a2f495504c92feb62a13590a161c25f282d1845aa600ad";
 
 const uid=()=>crypto.randomUUID?crypto.randomUUID():String(Date.now()+Math.random());
@@ -52,7 +53,12 @@ function normalizeState(data){
     if(r?.date) resultsByDate.set(r.date,r);
   });
   return {
-    members:Array.isArray(safe.members)?safe.members:[],
+    members:(Array.isArray(safe.members)?safe.members:[]).map(m=>({
+      ...m,
+      id:m.id||String(Date.now()+Math.random()),
+      name:String(m.name||"Người chơi").trim()||"Người chơi",
+      passwordHash:m.passwordHash||""
+    })),
     results:[...resultsByDate.values()],
     entries:Array.isArray(safe.entries)?safe.entries:[]
   };
@@ -413,10 +419,63 @@ function requireAdmin(){
   alert("Cần đăng nhập QTV.");
   return false;
 }
+function currentPlayer(){
+  return state.members.find(m=>m.id===currentPlayerId)||null;
+}
+function canViewAll(){
+  return isAdmin;
+}
+function canUsePlayerData(){
+  return isAdmin||!!currentPlayer();
+}
+function visibleMembers(){
+  if(isAdmin)return state.members;
+  const me=currentPlayer();
+  return me?[me]:[];
+}
+function visibleEntries(entries=state.entries){
+  if(isAdmin)return entries;
+  const me=currentPlayer();
+  return me?entries.filter(e=>e.memberId===me.id):[];
+}
+function canModifyEntry(entry){
+  return isAdmin||!!currentPlayer()&&entry.memberId===currentPlayerId;
+}
+function requirePlayerOrAdmin(){
+  if(canUsePlayerData())return true;
+  alert("Hãy đăng nhập hoặc đăng ký người chơi trước.");
+  return false;
+}
 function renderAdminState(){
   $$(".admin-only").forEach(el=>el.classList.toggle("admin-hidden",!isAdmin));
   $("#adminForm").classList.toggle("admin-hidden",isAdmin);
   if(isAdmin)fillCloudForm();
+  renderPlayerSession();
+}
+function renderPlayerSession(){
+  const me=currentPlayer();
+  const playerForm=$("#playerLoginForm");
+  const session=$("#playerSession");
+  const register=$("#playerRegisterForm");
+  if($("#playerLoginMember")){
+    $("#playerLoginMember").innerHTML=state.members.length?
+      state.members.map(m=>`<option value="${m.id}">${esc(m.name)}${m.passwordHash?"":" (chưa MK)"}</option>`).join(""):
+      '<option value="">Chưa có người chơi</option>';
+    if(me)$("#playerLoginMember").value=me.id;
+  }
+  if(playerForm)playerForm.classList.toggle("hidden",isAdmin||!!me);
+  if(register)register.classList.toggle("hidden",isAdmin||!!me);
+  if(session){
+    session.classList.toggle("hidden",!isAdmin&&!me);
+    session.innerHTML=isAdmin?
+      '<strong>QTV xem tất cả</strong>':
+      me?`<strong>${esc(me.name)}</strong><button type="button" onclick="logoutPlayer()">Thoát</button>`:"";
+  }
+}
+function logoutPlayer(){
+  currentPlayerId="";
+  sessionStorage.removeItem("so-diem-vui-player");
+  render();
 }
 function esc(s){return String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'}[c]))}
 function displayDate(date){
@@ -734,7 +793,9 @@ $("#adminForm").addEventListener("submit",async e=>{
   $("#adminPassword").value="";
   if(!ok){alert("Sai mật khẩu QTV.");return}
   isAdmin=true;
+  currentPlayerId="";
   sessionStorage.setItem("so-diem-vui-admin","1");
+  sessionStorage.removeItem("so-diem-vui-player");
   render();
 });
 $("#adminLogout").addEventListener("click",()=>{
@@ -743,10 +804,48 @@ $("#adminLogout").addEventListener("click",()=>{
   render();
 });
 
-$("#memberForm").addEventListener("submit",e=>{
+$("#playerLoginForm").addEventListener("submit",async e=>{
+  e.preventDefault();
+  const id=$("#playerLoginMember").value;
+  const member=state.members.find(m=>m.id===id);
+  if(!member){alert("Chưa chọn người chơi.");return}
+  if(!member.passwordHash){alert("Người chơi này chưa có mật khẩu. Nhờ QTV đặt mật khẩu trước.");return}
+  const ok=await sha256($("#playerLoginPassword").value)===member.passwordHash;
+  $("#playerLoginPassword").value="";
+  if(!ok){alert("Sai mật khẩu người chơi.");return}
+  currentPlayerId=member.id;
+  isAdmin=false;
+  sessionStorage.setItem("so-diem-vui-player",currentPlayerId);
+  sessionStorage.removeItem("so-diem-vui-admin");
+  render();
+});
+
+$("#playerRegisterForm").addEventListener("submit",async e=>{
+  e.preventDefault();
+  const name=$("#playerName").value.trim();
+  const password=$("#playerPassword").value;
+  if(!name||password.length<4){alert("Tên và mật khẩu tối thiểu 4 ký tự.");return}
+  const exists=state.members.some(m=>m.name.trim().toLowerCase()===name.toLowerCase());
+  if(exists&&!confirm("Tên này đã có. Vẫn tạo thêm người chơi mới?"))return;
+  const member={id:uid(),name,passwordHash:await sha256(password)};
+  state.members.push(member);
+  currentPlayerId=member.id;
+  isAdmin=false;
+  sessionStorage.setItem("so-diem-vui-player",currentPlayerId);
+  sessionStorage.removeItem("so-diem-vui-admin");
+  $("#playerName").value="";
+  $("#playerPassword").value="";
+  save();
+});
+
+$("#memberForm").addEventListener("submit",async e=>{
   e.preventDefault(); const name=$("#memberName").value.trim(); if(!name)return;
   if(!requireAdmin())return;
-  state.members.push({id:uid(),name}); $("#memberName").value=""; save();
+  const password=$("#memberPassword").value;
+  state.members.push({id:uid(),name,passwordHash:password?await sha256(password):""});
+  $("#memberName").value="";
+  $("#memberPassword").value="";
+  save();
 });
 
 $("#resultForm").addEventListener("submit",e=>{
@@ -784,9 +883,11 @@ $("#resultImage").addEventListener("change",e=>{
 
 $("#entryForm").addEventListener("submit",e=>{
   e.preventDefault();
-  if(!state.members.length){alert("Hãy thêm thành viên trước.");return}
+  if(!requirePlayerOrAdmin())return;
+  const memberId=isAdmin?$("#entryMember").value:currentPlayerId;
+  if(!memberId){alert("Chưa chọn người chơi.");return}
   state.entries.push({
-    id:uid(),date:$("#entryDate").value,memberId:$("#entryMember").value,
+    id:uid(),date:$("#entryDate").value,memberId,
     type:$("#entryType").value,number:two($("#entryNumber").value),
     points:Number($("#entryPoints").value)
   });
@@ -794,9 +895,10 @@ $("#entryForm").addEventListener("submit",e=>{
 });
 
 $("#quickEntryBtn").addEventListener("click",()=>{
-  if(!state.members.length){alert("Hãy thêm thành viên trước.");return}
+  if(!requirePlayerOrAdmin())return;
   const date=$("#entryDate").value;
-  const memberId=$("#entryMember").value;
+  const memberId=isAdmin?$("#entryMember").value:currentPlayerId;
+  if(!memberId){alert("Chưa chọn người chơi.");return}
   const lines=$("#quickEntryText").value.split(/\r?\n|;/).map(x=>x.trim()).filter(Boolean);
   if(!lines.length){
     $("#quickEntryStatus").textContent="Chưa có nội dung.";
@@ -1014,7 +1116,7 @@ function removeMember(id){
   state.members=state.members.filter(x=>x.id!==id);
   state.entries=state.entries.filter(x=>x.memberId!==id);save()
 }
-function editMember(id){
+async function editMember(id){
   if(!requireAdmin())return;
   const member=state.members.find(x=>x.id===id);
   if(!member)return;
@@ -1023,16 +1125,33 @@ function editMember(id){
   member.name=name.trim();
   save();
 }
-function removeEntry(id){state.entries=state.entries.filter(x=>x.id!==id);save()}
+async function setMemberPassword(id){
+  if(!requireAdmin())return;
+  const member=state.members.find(x=>x.id===id);
+  if(!member)return;
+  const password=prompt(`Đặt mật khẩu mới cho ${member.name}`, "");
+  if(!password)return;
+  if(password.trim().length<4){alert("Mật khẩu tối thiểu 4 ký tự.");return}
+  member.passwordHash=await sha256(password.trim());
+  save();
+  alert(`Đã đặt mật khẩu cho ${member.name}.`);
+}
+function removeEntry(id){
+  const entry=state.entries.find(x=>x.id===id);
+  if(!entry||!canModifyEntry(entry)){alert("Bạn không có quyền xóa lượt này.");return}
+  state.entries=state.entries.filter(x=>x.id!==id);save()
+}
 function removeEntries(ids){
   const set=new Set(String(ids).split(","));
+  const selected=state.entries.filter(x=>set.has(x.id));
+  if(selected.some(x=>!canModifyEntry(x))){alert("Bạn không có quyền xóa một số lượt trong nhóm này.");return}
   state.entries=state.entries.filter(x=>!set.has(x.id));save();
 }
 function removeEntriesByDate(date){
   if(!confirm(`Xóa toàn bộ lượt dự đoán ngày ${displayDate(date)}?`))return;
-  state.entries=state.entries.filter(x=>x.date!==date);save();
+  state.entries=state.entries.filter(x=>x.date!==date||!canModifyEntry(x));save();
 }
-window.removeMember=removeMember; window.editMember=editMember; window.removeEntry=removeEntry; window.removeEntries=removeEntries; window.removeEntriesByDate=removeEntriesByDate;
+window.removeMember=removeMember; window.editMember=editMember; window.setMemberPassword=setMemberPassword; window.removeEntry=removeEntry; window.removeEntries=removeEntries; window.removeEntriesByDate=removeEntriesByDate; window.logoutPlayer=logoutPlayer;
 
 function aggregate(entries){
   return entries.reduce((sum,e)=>{
@@ -1073,21 +1192,31 @@ function lotoNumbers(result){
 }
 
 function renderMembers(){
-  $("#memberList").innerHTML=state.members.length?state.members.map(m=>`
+  const members=visibleMembers();
+  if(!isAdmin&&!currentPlayer()){
+    $("#memberList").innerHTML='<p class="muted">Đăng nhập hoặc đăng ký để xem sổ của bạn.</p>';
+    $("#entryMember").innerHTML='<option value="">Đăng nhập trước</option>';
+    $("#entryMember").disabled=true;
+    return;
+  }
+  $("#memberList").innerHTML=members.length?members.map(m=>`
     <div class="member"><strong>${esc(m.name)}</strong>
+    <small>${m.passwordHash?"Có mật khẩu":"Chưa có mật khẩu"}</small>
     <span class="member-actions admin-only">
       <button class="secondary" type="button" onclick="editMember('${m.id}')">Sửa</button>
+      <button class="secondary" type="button" onclick="setMemberPassword('${m.id}')">Đặt MK</button>
       <button class="danger" type="button" onclick="removeMember('${m.id}')">Xóa</button>
     </span></div>`).join(""):
     '<p class="muted">Chưa có thành viên.</p>';
-  $("#entryMember").innerHTML=state.members.map(m=>`<option value="${m.id}">${esc(m.name)}</option>`).join("");
+  $("#entryMember").innerHTML=members.map(m=>`<option value="${m.id}">${esc(m.name)}</option>`).join("");
+  $("#entryMember").disabled=!isAdmin;
 }
 
 function renderEntries(){
   const filter=$("#filterDate").value;
-  const entries=[...state.entries].filter(x=>!filter||x.date===filter).sort((a,b)=>b.date.localeCompare(a.date));
+  const entries=visibleEntries([...state.entries]).filter(x=>!filter||x.date===filter).sort((a,b)=>b.date.localeCompare(a.date));
   if(!entries.length){
-    $("#summaryBody").innerHTML='<tr><td colspan="9" class="muted">Chưa có lượt nào.</td></tr>';
+    $("#summaryBody").innerHTML=`<tr><td colspan="9" class="muted">${canUsePlayerData()?"Chưa có lượt nào.":"Đăng nhập người chơi để xem dữ liệu của bạn."}</td></tr>`;
     return;
   }
   const grouped=new Map();
@@ -1146,9 +1275,9 @@ function renderEntryDetails(entries){
           <td>${e.points}</td>
         <td>${hitLabel(e,c)}</td>
           <td>${c.cost}</td>
-          <td>${c.reward===null?"-":c.reward}</td>
+        <td>${c.reward===null?"-":c.reward}</td>
           <td>${status}</td>
-          <td><button class="danger" onclick="event.stopPropagation();removeEntry('${e.id}')">Xóa</button></td>
+          <td>${canModifyEntry(e)?`<button class="danger" onclick="event.stopPropagation();removeEntry('${e.id}')">Xóa</button>`:""}</td>
         </tr>`;
       }).join("")}</tbody>
     </table>
@@ -1204,7 +1333,7 @@ function renderGroupedEntryDetail(entries){
     <td>${cost}</td>
     <td>${pending?"-":reward}</td>
     <td>${status}</td>
-    <td><button class="danger" onclick="event.stopPropagation();removeEntries('${ids}')">Xóa</button></td>
+    <td>${entries.every(canModifyEntry)?`<button class="danger" onclick="event.stopPropagation();removeEntries('${ids}')">Xóa</button>`:""}</td>
   </tr>`;
 }
 
@@ -1325,18 +1454,19 @@ function renderHeadStats(){
 }
 
 function renderResultStats(){
-  const all=aggregate(state.entries);
+  const entries=visibleEntries(state.entries);
+  const all=aggregate(entries);
   const dates=stateCache.resultsDesc.map(r=>r.date);
   $("#resultStats").innerHTML=`
     <div class="stat-grid">
       <div class="stat-card">Ngày có kết quả<strong>${state.results.length}</strong></div>
-      <div class="stat-card">Lượt đã nhập<strong>${state.entries.length}</strong></div>
+      <div class="stat-card">Lượt đã nhập<strong>${entries.length}</strong></div>
       <div class="stat-card">Lượt chờ chấm<strong>${all.pending}</strong></div>
     </div>
     <div class="result-list">
       ${dates.length?dates.map(date=>{
         const r=resultForDate(date);
-        const dayEntries=state.entries.filter(e=>e.date===date);
+        const dayEntries=entries.filter(e=>e.date===date);
         const a=aggregate(dayEntries);
         return `<div class="result-item">
           <div><strong>${displayDate(date)}</strong><br><small>ĐB ${esc(r.special)} · ${r.prizes.length} giải · ${dayEntries.length} lượt</small></div>
@@ -2286,10 +2416,11 @@ function renderPatternTable(rows){
 
 function renderReport(){
   const filter=$("#reportDate").value;
-  const entries=state.entries.filter(e=>!filter||e.date===filter);
+  const entries=visibleEntries(state.entries).filter(e=>!filter||e.date===filter);
   const total=aggregate(entries);
   const net=total.reward-total.cost;
-  const byMember=state.members.map(m=>{
+  const members=visibleMembers();
+  const byMember=members.map(m=>{
     const memberEntries=entries.filter(e=>e.memberId===m.id);
     const a=aggregate(memberEntries);
     return {name:m.name,...a,net:a.reward-a.cost};
@@ -2305,8 +2436,9 @@ function renderReport(){
 }
 
 function renderLeaderboard(){
-  const ranks=state.members.map(m=>{
-    const a=aggregate(state.entries.filter(e=>e.memberId===m.id));
+  const members=visibleMembers();
+  const ranks=members.map(m=>{
+    const a=aggregate(visibleEntries(state.entries).filter(e=>e.memberId===m.id));
     return {name:m.name,...a,net:a.reward-a.cost};
   }).sort((a,b)=>b.net-a.net);
   $("#leaderboard").innerHTML=ranks.length?ranks.map((r,i)=>`

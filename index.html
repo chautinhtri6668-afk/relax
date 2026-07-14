@@ -9,20 +9,22 @@
 <body>
 <header>
   <div>
-    <h1>Sổ điểm vui</h1>
-    <p>Dán kết quả, ghi số, tự chấm điểm.</p>
+    <h1>THẦN SỐ HỌC</h1>
+    <p>Theo dõi, dự đoán, thống kê, báo cáo số học.</p>
   </div>
   <div class="head-actions">
     <span id="storageStatus" class="storage-status">Đang kiểm tra lưu trữ...</span>
-    <form id="adminForm" class="admin-login">
-      <input id="adminPassword" type="password" placeholder="Mật khẩu QTV" autocomplete="current-password">
-      <button type="submit">QTV</button>
+    <form id="playerLoginForm" class="player-login">
+      <select id="playerLoginMember" aria-label="Người chơi"></select>
+      <input id="playerLoginPassword" type="password" placeholder="Mật khẩu người chơi" autocomplete="current-password">
+      <button type="submit">Vào</button>
     </form>
+    <div id="playerSession" class="session-chip hidden"></div>
   </div>
 </header>
 
 <main>
-  <section class="notice">
+  <section class="notice hidden">
     <strong>Luật điểm:</strong>
     Lô: trừ 23, trúng +80 mỗi điểm. Đề: trúng +80 lần điểm ghi.
   </section>
@@ -39,7 +41,13 @@
         <h2>Người chơi</h2>
         <form id="memberForm" class="inline admin-only">
           <input id="memberName" maxlength="40" placeholder="Tên thành viên" required>
+          <input id="memberPassword" type="password" maxlength="40" placeholder="Mật khẩu">
           <button>Thêm</button>
+        </form>
+        <form id="playerRegisterForm" class="player-register">
+          <input id="playerName" maxlength="40" placeholder="Tên người chơi" required>
+          <input id="playerPassword" type="password" minlength="4" maxlength="40" placeholder="Mật khẩu riêng" required>
+          <button type="submit">Đăng ký</button>
         </form>
         <div id="memberList"></div>
       </article>
@@ -224,6 +232,13 @@
     </section>
   </section>
 </main>
+
+<section class="admin-login-footer">
+  <form id="adminForm" class="admin-login">
+    <input id="adminPassword" type="password" placeholder="Mật khẩu QTV" autocomplete="current-password">
+    <button type="submit">QTV</button>
+  </form>
+</section>
 
 <footer id="adminPanel" class="admin-panel admin-only">
   <div class="admin-panel-inner">

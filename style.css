@@ -10,14 +10,18 @@ main{max-width:1180px;margin:22px auto;padding:0 18px 32px}
 .inline{display:flex;gap:9px;align-items:center}
 .head-actions{display:flex;gap:8px;flex-wrap:wrap}
 .admin-panel{background:#0f172a;color:#e5e7eb;padding:22px 18px;margin-top:22px}
+.admin-login-footer{max-width:1180px;margin:18px auto 0;padding:0 18px;display:flex;justify-content:flex-end}
+.admin-login-footer .admin-login{background:#e5edf5;border:1px solid #cbd5e1;border-radius:8px;padding:8px}
+.admin-login-footer .admin-login input{background:#fff;color:#111827;border-color:#cbd5e1}
+.admin-login-footer .admin-login input::placeholder{color:#64748b}
 .admin-panel-inner{max-width:1180px;margin:0 auto;border:1px solid rgba(255,255,255,.12);border-radius:8px;background:rgba(255,255,255,.05);padding:14px}
 .admin-panel h2{margin:0;color:#fff}.admin-panel .muted{color:#cbd5e1}
 .admin-tools{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:14px;padding-bottom:14px;border-bottom:1px solid rgba(255,255,255,.14)}
 .admin-panel .cloud-form{border:1px solid rgba(147,197,253,.35);border-radius:8px;background:rgba(255,255,255,.08);padding:12px}
 .admin-panel .cloud-form h3{margin:0 0 10px;color:#bfdbfe}
 .cloud-grid{display:grid;grid-template-columns:1.4fr .8fr;gap:12px}
-.admin-login{display:flex;gap:6px;align-items:center}.admin-login input{width:150px;padding:7px 9px;border:1px solid rgba(255,255,255,.45);background:rgba(255,255,255,.14);color:#fff}.admin-login input::placeholder{color:#e0f2fe}.admin-login button{padding:7px 10px;background:#0f172a}
-.admin-hidden{display:none!important}.member-actions{display:flex;gap:6px}
+.admin-login,.player-login{display:flex;gap:6px;align-items:center}.admin-login input,.player-login input,.player-login select{width:150px;padding:7px 9px;border:1px solid rgba(255,255,255,.45);background:rgba(255,255,255,.14);color:#fff}.player-login select option{color:#111827}.admin-login input::placeholder,.player-login input::placeholder{color:#e0f2fe}.admin-login button,.player-login button{padding:7px 10px;background:#0f172a}
+.session-chip{display:flex;align-items:center;gap:8px;border:1px solid rgba(255,255,255,.28);border-radius:999px;padding:5px 8px;background:rgba(255,255,255,.12);color:#fff}.session-chip button{padding:5px 8px;background:#334155}.hidden,.admin-hidden{display:none!important}.member-actions{display:flex;gap:6px}
 .storage-status{align-self:center;border:1px solid rgba(255,255,255,.2);border-radius:999px;padding:6px 10px;color:#d1d5db;font-size:12px;font-weight:700}
 .storage-status.ok{color:#bbf7d0}.storage-status.warn{color:#fed7aa;border-color:#fed7aa}
 label{display:flex;flex-direction:column;gap:6px;font-size:14px;font-weight:650}
@@ -34,7 +38,7 @@ button:hover,.import-label:hover{filter:brightness(.96)}.secondary{background:#3
 .subtab.active{background:#ea580c;color:#fff;box-shadow:0 2px 8px rgba(234,88,12,.22)}
 .tab-panel,.subtab-panel{display:none}.tab-panel.active,.subtab-panel.active{display:block}
 .quick-entry{margin-top:14px;padding-top:14px;border-top:1px solid var(--line);display:grid;gap:10px}
-.member{display:flex;justify-content:space-between;align-items:center;padding:9px 0;border-bottom:1px solid var(--line);gap:12px}
+.member{display:flex;justify-content:space-between;align-items:center;padding:9px 0;border-bottom:1px solid var(--line);gap:12px}.member small{color:var(--muted);font-size:12px}.player-register{display:grid;grid-template-columns:1fr 1fr auto;gap:8px;margin:10px 0}.player-register input{min-width:0}
 .danger{background:var(--red);padding:6px 9px}.section-head{display:flex;justify-content:space-between;align-items:center;gap:12px;margin-bottom:12px}
 .card h2{margin-top:0;color:#0f172a}.table-wrap{overflow:auto}.table-wrap table{width:100%;border-collapse:collapse;min-width:1050px}.table-wrap th,.table-wrap td{padding:10px;border-bottom:1px solid var(--line);text-align:left;font-size:14px;vertical-align:top}
 .table-wrap th{background:#f8fafc;color:#334155}
@@ -146,8 +150,11 @@ small,.muted{color:var(--muted)}
   header p{font-size:13px}
   .head-actions{width:100%;gap:6px}
   .storage-status{order:2;width:100%;text-align:center;justify-content:center;border-radius:8px}
-  .admin-login{width:100%;display:grid;grid-template-columns:1fr auto}
-  .admin-login input{width:100%;min-width:0}
+  .admin-login,.player-login{width:100%;display:grid;grid-template-columns:1fr auto}
+  .player-login{grid-template-columns:1fr 1fr auto}
+  .admin-login input,.player-login input,.player-login select{width:100%;min-width:0}
+  .admin-login-footer{padding:0 10px;margin-top:10px}
+  .session-chip{width:100%;justify-content:space-between;border-radius:8px}
   main{margin:12px auto;padding:0 10px 24px}
   .notice,.card{padding:12px;margin-bottom:10px;border-radius:8px;box-shadow:0 4px 12px rgba(15,23,42,.05)}
   .notice{font-size:13px}
@@ -161,6 +168,7 @@ small,.muted{color:var(--muted)}
   .section-head{gap:8px;margin-bottom:10px}
   .section-head h2,.card h2{font-size:18px;margin-bottom:0}
   .entry-form{grid-template-columns:1fr;gap:10px}
+  .player-register{grid-template-columns:1fr;gap:8px}
   .quick-entry textarea{min-height:92px}
   .member{align-items:flex-start;gap:8px}
   .member-actions{width:100%;justify-content:flex-end}
