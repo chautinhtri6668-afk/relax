@@ -30,6 +30,10 @@ let pastedImage="";
 let ocrRun=0;
 let isAdmin=sessionStorage.getItem("so-diem-vui-admin")==="1";
 let currentPlayerId=sessionStorage.getItem("so-diem-vui-player")||"";
+const patternBaseState={
+  forecast:{manual:false,latest:""},
+  law:{manual:false,latest:""}
+};
 const ADMIN_HASH="e6121f114d1b02a340a2f495504c92feb62a13590a161c25f282d1845aa600ad";
 
 const uid=()=>crypto.randomUUID?crypto.randomUUID():String(Date.now()+Math.random());
@@ -326,7 +330,7 @@ function setCloudStatus(message,ok=true){
   const el=$("#cloudStatus");
   if(el){
     el.textContent=message;
-    el.className=ok?"storage-status ok":"storage-status warn";
+    el.className=ok?"cloud-status-note ok":"cloud-status-note warn";
   }
   lastSaveMessage=message;
   updateStorageStatus();
@@ -376,19 +380,48 @@ async function fetchCloudDataForCheck(allowPrompt=false){
   if(!res.data)throw new Error("Cloud chưa có dữ liệu");
   return {data:normalizeState(res.data),updatedAt:res.updatedAt||""};
 }
+async function postCloudState(data){
+  const cfg=cloudConfig();
+  await fetch(cfg.url,{
+    method:"POST",
+    mode:"no-cors",
+    headers:{"Content-Type":"text/plain;charset=utf-8"},
+    body:JSON.stringify({action:"save",token:cfg.token,data:normalizeState(data)})
+  });
+}
+function latestResultDetail(data){
+  const safe=normalizeState(data);
+  const latest=[...safe.results].sort((a,b)=>b.date.localeCompare(a.date))[0];
+  if(!latest)return "Kết quả: chưa có dữ liệu.";
+  return `Kết quả mới nhất: ngày ${displayDate(latest.date)} · ĐB ${latest.special} · ${latest.prizes?.length||0} giải.`;
+}
+function latestPredictionDetail(data){
+  const safe=normalizeState(data);
+  const latestDate=[...safe.entries].map(e=>e.date).sort((a,b)=>b.localeCompare(a))[0];
+  if(!latestDate)return "Dự đoán: chưa có lượt dự đoán.";
+  const dayEntries=safe.entries.filter(e=>e.date===latestDate);
+  const memberParts=safe.members
+    .filter(member=>dayEntries.some(e=>e.memberId===member.id))
+    .map(member=>{
+      const rows=buildPredictionSummaryRows(dayEntries.filter(e=>e.memberId===member.id));
+      return `${member.name}: ${rows.map(row=>row.copy).join("; ")}`;
+    });
+  return `Dự đoán mới nhất: ngày ${displayDate(latestDate)} · ${dayEntries.length} lượt.\n${memberParts.join("\n")}`;
+}
+function cloudDetailMessage(action,data,updatedAt=""){
+  return `${action}${updatedAt?` · Cloud cập nhật ${updatedAt}`:""}\n${latestPredictionDetail(data)}\n${latestResultDetail(data)}`;
+}
 async function checkCloudState(){
   if(!requireAdmin())return;
   setCloudStatus("Đang kiểm tra cloud...");
   try{
     const cloud=await fetchCloudDataForCheck(false);
     if(!cloud)return;
-    const message=`Cloud có ${stateStatsText(cloud.data)}${cloud.updatedAt?`, cập nhật ${cloud.updatedAt}`:""}.`;
+    const message=cloudDetailMessage("Đã kiểm tra cloud.",cloud.data,cloud.updatedAt);
     setCloudStatus(message);
-    alert(message);
   }catch(err){
     const message=`Kiểm tra cloud lỗi: ${err.message||err}`;
     setCloudStatus(message,false);
-    alert(message);
   }
 }
 async function loadCloudState(){
@@ -403,13 +436,12 @@ async function loadCloudState(){
     makeLocalBackup("before-load-cloud");
     state=incoming;
     save();
-    const message=`Đã tải cloud về máy này: ${stateStatsText(state)}.`;
+    const message=cloudDetailMessage("Đã lấy cloud toàn bộ.",state,cloud.updatedAt);
     setCloudStatus(message);
-    alert(message);
+    alert("Lấy cloud thành công.");
   }catch(err){
     const message=`Tải cloud lỗi: ${err.message||err}`;
     setCloudStatus(message,false);
-    alert(message);
   }
 }
 async function loadCloudForPlayer(){
@@ -443,15 +475,49 @@ async function saveCloudState(){
   const cfg=cloudConfig();
   setCloudStatus("Đang gửi dữ liệu lên cloud...");
   try{
-    await fetch(cfg.url,{
-      method:"POST",
-      mode:"no-cors",
-      headers:{"Content-Type":"text/plain;charset=utf-8"},
-      body:JSON.stringify({action:"save",token:cfg.token,data:state})
-    });
-    setCloudStatus(`Đã gửi dữ liệu lên cloud: ${stateStatsText(state)}. Bấm Tải cloud ở máy khác để lấy về.`);
+    await postCloudState(state);
+    setCloudStatus(cloudDetailMessage("Đã lưu cloud toàn bộ.",state));
+    alert("Lưu cloud thành công.");
   }catch(err){
     setCloudStatus(`Lưu cloud lỗi: ${err.message||err}`,false);
+  }
+}
+async function loadCloudPredictions(){
+  if(!requireAdmin())return;
+  setCloudStatus("Đang lấy cloud dự đoán...");
+  try{
+    const cloud=await fetchCloudDataForCheck(false);
+    if(!cloud)return;
+    const incoming=normalizeState(cloud.data);
+    const localResults=state.results;
+    makeLocalBackup("before-load-cloud-predictions");
+    state=normalizeState({...state,members:incoming.members,entries:incoming.entries,results:localResults});
+    save();
+    setCloudStatus(`${cloudDetailMessage("Đã lấy cloud dự đoán.",{...state,results:localResults},cloud.updatedAt)}\nKết quả trên máy được giữ nguyên: ${localResults.length} ngày.`);
+    alert("Lấy cloud dự đoán thành công.");
+  }catch(err){
+    setCloudStatus(`Lấy cloud dự đoán lỗi: ${err.message||err}`,false);
+  }
+}
+async function saveCloudPredictions(){
+  if(!requireAdmin())return;
+  if(!saveCloudConfig())return;
+  if(!confirm(`Lưu cloud dự đoán: đẩy ${state.members.length} người chơi và ${state.entries.length} lượt dự đoán lên cloud, giữ nguyên kết quả đang có trên cloud?`))return;
+  setCloudStatus("Đang lưu cloud dự đoán...");
+  try{
+    const cloud=await fetchCloudDataForCheck(false);
+    const cloudData=normalizeState(cloud?.data||EMPTY_STATE);
+    const updatedAt=cloud?.updatedAt||"";
+    const merged=normalizeState({
+      members:state.members,
+      entries:state.entries,
+      results:cloudData.results?.length?cloudData.results:state.results
+    });
+    await postCloudState(merged);
+    setCloudStatus(`${cloudDetailMessage("Đã lưu cloud dự đoán.",{...state,results:merged.results},updatedAt)}\nKết quả trên cloud được giữ nguyên: ${merged.results.length} ngày.`);
+    alert("Lưu cloud dự đoán thành công.");
+  }catch(err){
+    setCloudStatus(`Lưu cloud dự đoán lỗi: ${err.message||err}`,false);
   }
 }
 async function copyPlayerCloudLink(){
@@ -504,7 +570,7 @@ function canModifyEntry(entry){
 }
 function requirePlayerOrAdmin(){
   if(canUsePlayerData())return true;
-  alert("Hãy đăng nhập hoặc đăng ký người chơi trước.");
+  alert("Hãy tải cloud và đăng nhập người chơi trước.");
   return false;
 }
 function renderAdminState(){
@@ -597,6 +663,107 @@ function parseQuickEntryLine(line){
   const type=suffix==="k"?"de":suffix==="đ"||suffix==="d"||suffix==="điểm"||suffix==="diem"?"lo":$("#entryType").value;
   return {type,numbers,points,groupLabel:""};
 }
+function parseManualNumbers(text){
+  return [...String(text||"").matchAll(/\d{1,2}/g)]
+    .map(match=>two(match[0]))
+    .filter((number,index,all)=>all.indexOf(number)===index);
+}
+function manualNumberCandidates(numbers,autoRows,type){
+  return numbers.map((number,index)=>{
+    const matched=autoRows
+      .filter(row=>row.target===type&&row.numbers?.includes(number))
+      .sort((a,b)=>b.score-a.score||b.rate-a.rate||b.hit-a.hit)
+      .slice(0,4);
+    const score=matched.reduce((sum,row)=>sum+Math.max(0,row.score)+(row.rate*0.08),0);
+    const bestRate=matched.reduce((max,row)=>Math.max(max,row.rate||0),0);
+    const count=matched.length;
+    const bestRule=matched[0];
+    return {number,index,type,score,count,bestRate,bestRule};
+  }).sort((a,b)=>b.score-a.score||b.bestRate-a.bestRate||b.count-a.count||a.index-b.index);
+}
+function buildManualNumberAnalysis(numbers){
+  const baseResult=stateCache.resultsDesc[0];
+  if(!baseResult)return {numbers,baseResult:null,autoRows:[],lo:[],de:[],loCandidates:[],deCandidates:[],allocation:null};
+  const autoRows=buildAutoRowsForBase(baseResult,stateCache.results,stateCache.resultsByDate);
+  const mode=$("#referenceMode")?.value||"fun";
+  const strong=mode==="strong";
+  const loCandidates=manualNumberCandidates(numbers,autoRows,"lo");
+  const deCandidates=manualNumberCandidates(numbers,autoRows,"db");
+  const hasSignal=[...loCandidates,...deCandidates].some(x=>x.score>0||x.count>0);
+  const loBudget=strong?360:180;
+  const deBudget=strong?260:120;
+  const lo=hasSignal?applyStakeBudget(loCandidates.filter(x=>x.score>0||x.count>0).slice(0,strong?6:4),"lo",loBudget):[];
+  const de=hasSignal?applyStakeBudget(deCandidates.filter(x=>x.score>0||x.count>0).slice(0,strong?5:3),"de",deBudget):[];
+  const allocation={
+    lo,
+    de,
+    pool:[...new Set([...loCandidates,...deCandidates].filter(x=>x.score>0||x.count>0).map(x=>x.number))],
+    confidence:referenceConfidence(autoRows.filter(row=>numbers.some(n=>row.numbers?.includes(n)))),
+    mode:`Số tự chọn · ${strong?"Kết mạnh":"Đánh vui"}`,
+    target:loBudget+deBudget,
+    totalCost:referenceCost(lo,"lo")+referenceCost(de,"de"),
+    forecastDate:addDate(baseResult.date,1)
+  };
+  allocation.signal=referenceSignal(allocation);
+  const nextResult=stateCache.resultsByDate.get(allocation.forecastDate);
+  allocation.performance=nextResult?evaluateReferencePerformance(allocation,nextResult):null;
+  return {numbers,baseResult,autoRows,lo, de,loCandidates,deCandidates,allocation};
+}
+function renderManualAnalysisRows(candidates,picks,type){
+  const stakeByNumber=new Map(picks.map(p=>[p.number,p.stake]));
+  const rows=candidates.slice(0,8);
+  if(!rows.length)return '<p class="muted">Chưa có số để phân tích.</p>';
+  return `<div class="manual-analysis-list">${rows.map(row=>{
+    const stake=stakeByNumber.get(row.number)||0;
+    const rule=row.bestRule;
+    const rate=rule?`${Math.round(rule.rate*100)}%`:"-";
+    const sample=rule?`${rule.hit}/${rule.total}`:"chưa khớp rule";
+    return `<div class="manual-analysis-row">
+      <b>${row.number}</b>
+      <span>${rate} · ${sample}${rule?` · ${esc(rule.name.replace(/^Từ [^:]+:\s*/,""))}`:""}</span>
+      <em>${stake?`${stake}${type==="de"?"k":"đ"}`:"bỏ"}</em>
+    </div>`;
+  }).join("")}</div>`;
+}
+function renderManualNumberAnalysis(){
+  const target=$("#analyzeNumbersResult");
+  if(!target)return;
+  const numbers=parseManualNumbers($("#analyzeNumbersText").value);
+  if(!numbers.length){
+    target.innerHTML='<p class="muted">Nhập vài số cần soi, ví dụ: 05 13 67 76-31-50.</p>';
+    return;
+  }
+  const analysis=buildManualNumberAnalysis(numbers);
+  if(!analysis.baseResult){
+    target.innerHTML='<p class="muted">Chưa có dữ liệu kết quả để soi xác suất.</p>';
+    return;
+  }
+  const {baseResult,allocation}=analysis;
+  target.innerHTML=`<div class="manual-analysis-card">
+    <div class="manual-analysis-head">
+      <strong>Soi từ kết quả mới nhất ${displayDate(baseResult.date)}</strong>
+      <small>Gợi ý cho ${displayDate(allocation.forecastDate)} · trừ ${allocation.totalCost} điểm</small>
+    </div>
+    ${renderReferenceSignal(allocation.signal)}
+    ${renderReferencePerformance(allocation.performance)}
+    ${renderReferencePool(allocation.pool)}
+    <div class="reference-grid">
+      ${renderReferenceGroup("Lô phân bổ",analysis.lo,"lo")}
+      ${renderReferenceGroup("Đề phân bổ",analysis.de,"de")}
+    </div>
+    <div class="manual-analysis-grid">
+      <div class="manual-analysis-group">
+        <h4>Lô nên ưu tiên</h4>
+        ${renderManualAnalysisRows(analysis.loCandidates,analysis.lo,"lo")}
+      </div>
+      <div class="manual-analysis-group">
+        <h4>Đề nên ưu tiên</h4>
+        ${renderManualAnalysisRows(analysis.deCandidates,analysis.de,"de")}
+      </div>
+    </div>
+    <p class="manual-analysis-note">Số “bỏ” là số chưa khớp rule đủ tốt trong kho dữ liệu, nên giảm điểm hoặc loại để đỡ âm.</p>
+  </div>`;
+}
 function memberName(id){return state.members.find(x=>x.id===id)?.name||"Đã xóa"}
 function resultForDate(date){return stateCache.resultsByDate.get(date)}
 function upsertResult(date,special,prizes){
@@ -654,7 +821,7 @@ function importResultsFromCsv(text){
   const dateIndex=headers.findIndex(h=>/^date$|ngay|ngày/i.test(h));
   const specialIndex=headers.findIndex(h=>csvPrizeKind(h)==="special");
   const resultMap=new Map(state.results.map(r=>[r.date,r]));
-  let imported=0,updated=0,skipped=0;
+  let imported=0,updated=0,skipped=0,latestDate="";
   rows.slice(1).forEach(cells=>{
     const date=parseCsvDate(cells[dateIndex]);
     if(!date){skipped++;return}
@@ -677,12 +844,13 @@ function importResultsFromCsv(text){
     const existing=resultMap.get(date);
     const result={id:existing?.id||uid(),date,special,prizes:prizes.slice(0,27)};
     resultMap.set(date,result);
+    if(!latestDate||date>latestDate)latestDate=date;
     imported++;
     if(existing)updated++;
   });
   state.results=[...resultMap.values()];
   touchState();
-  return {imported,updated,skipped};
+  return {imported,updated,skipped,latestDate};
 }
 
 function loadResultIntoForm(date){
@@ -776,9 +944,54 @@ function extractNumberTokens(text){
     .map(token=>token.cleaned);
 }
 
+function prizeKindFromLine(line){
+  const text=String(line).toLowerCase();
+  if(/(?:đặc\s*biệt|g\s*\.?\s*(?:đb|db|d8))/.test(text))return "db";
+  if(/(?:gi[ảa]i\s*nhất|g\s*\.?\s*1)\b/.test(text))return "g1";
+  if(/(?:gi[ảa]i\s*(?:nhì|nhi)|g\s*\.?\s*2)\b/.test(text))return "g2";
+  if(/(?:gi[ảa]i\s*ba|g\s*\.?\s*3)\b/.test(text))return "g3";
+  if(/(?:gi[ảa]i\s*(?:tư|tu)|g\s*\.?\s*4)\b/.test(text))return "g4";
+  if(/(?:gi[ảa]i\s*(?:năm|nam)|g\s*\.?\s*5)\b/.test(text))return "g5";
+  if(/(?:gi[ảa]i\s*(?:sáu|sau)|g\s*\.?\s*6)\b/.test(text))return "g6";
+  if(/(?:gi[ảa]i\s*(?:bảy|bay)|g\s*\.?\s*7|^6\s*\.?\s*7\b|^67\b)/.test(text))return "g7";
+  return "";
+}
+
+function parsePrizeRows(text){
+  const specs={
+    db:{len:5,count:1},
+    g1:{len:5,count:1},
+    g2:{len:5,count:2},
+    g3:{len:5,count:6},
+    g4:{len:4,count:4},
+    g5:{len:4,count:6},
+    g6:{len:3,count:3},
+    g7:{len:2,count:4}
+  };
+  const order=["db","g1","g2","g3","g4","g5","g6","g7"];
+  const buckets=Object.fromEntries(order.map(key=>[key,[]]));
+  let current="";
+  stripOcrDates(text).split(/\r?\n/).forEach(line=>{
+    const kind=prizeKindFromLine(line);
+    if(kind)current=kind;
+    if(!current)return;
+    const spec=specs[current];
+    extractNumbersFromLine(line)
+      .filter(number=>number.length===spec.len)
+      .forEach(number=>{
+        if(buckets[current].length<spec.count)buckets[current].push(number);
+      });
+  });
+  const complete=order.every(key=>buckets[key].length>=specs[key].count);
+  if(!complete)return [];
+  return order.flatMap(key=>buckets[key].slice(0,specs[key].count));
+}
+
 function parseLotteryText(text){
   const date=parseOcrDate(text);
   const expected=[5,5,5,5,5,5,5,5,5,5,4,4,4,4,4,4,4,4,4,4,3,3,3,2,2,2,2];
+  const rowPrizes=parsePrizeRows(text);
+  if(rowPrizes.length===27)return {date,special:rowPrizes[0]||"",prizes:rowPrizes};
   const tokens=extractNumberTokens(text);
   const lastPrize=extractLastPrizeNumbers(text);
   const firstFive=tokens.findIndex(x=>x.length===5);
@@ -891,7 +1104,7 @@ $("#playerLoginForm").addEventListener("submit",async e=>{
   render();
 });
 
-$("#playerRegisterForm").addEventListener("submit",async e=>{
+$("#playerRegisterForm")?.addEventListener("submit",async e=>{
   e.preventDefault();
   const name=$("#playerName").value.trim();
   const password=$("#playerPassword").value;
@@ -932,6 +1145,7 @@ $("#resultForm").addEventListener("submit",e=>{
     pastedImage="";
     $("#resultImage").value="";
     $("#resultSelect").value=date;
+    $("#reportDate").value=date;
     setOcrStatus(`${overwritten?"Đã ghi đè":"Đã lưu"} kết quả ngày ${displayDate(date)}.`,"ok");
     save();
   };
@@ -997,6 +1211,7 @@ $("#quickEntryBtn").addEventListener("click",()=>{
     `Đã thêm ${added} lượt, tổng điểm ${addedPoints}, lỗi ${failed.length} dòng.`:
     `Đã thêm ${added} lượt, tổng điểm ${addedPoints}.`;
 });
+$("#analyzeNumbersBtn")?.addEventListener("click",renderManualNumberAnalysis);
 
 $("#entryType").addEventListener("change",()=>{
   $("#entryPoints").value=$("#entryType").value==="de"?10:1;
@@ -1004,12 +1219,49 @@ $("#entryType").addEventListener("change",()=>{
 $("#filterDate").addEventListener("change",render);
 $("#clearFilter").addEventListener("click",()=>{$("#filterDate").value="";render()});
 $("#reportDate").addEventListener("change",render);
-$("#clearReportDate").addEventListener("click",()=>{$("#reportDate").value="";render()});
+$("#clearReportDate").addEventListener("click",()=>{$("#reportDate").value=latestEntryDate(visibleEntries(state.entries));render()});
+$("#resultStatsRange").addEventListener("change",renderResultStats);
+$("#homeBtn")?.addEventListener("click",()=>{
+  $$(".tab").forEach(btn=>btn.classList.toggle("active",btn.dataset.tab==="predict"));
+  $$(".tab-panel").forEach(panel=>panel.classList.toggle("active",panel.id==="tab-predict"));
+  window.scrollTo({top:0,behavior:"smooth"});
+  render();
+});
+$("#jumpAdminLogin").addEventListener("click",()=>{
+  document.querySelector(".admin-login-box")?.scrollIntoView({behavior:"smooth",block:"center"});
+  setTimeout(()=>$("#adminPassword")?.focus(),350);
+});
+function updateFloatScrollButton(){
+  const btn=$("#topBtn");
+  if(!btn)return;
+  const maxScroll=Math.max(0,document.documentElement.scrollHeight-window.innerHeight);
+  const nearBottom=window.scrollY>Math.max(220,maxScroll*0.45);
+  btn.textContent=nearBottom?"Top":"Bottom";
+  btn.dataset.direction=nearBottom?"top":"bottom";
+}
+$("#topBtn").addEventListener("click",()=>{
+  const direction=$("#topBtn").dataset.direction||"bottom";
+  window.scrollTo({top:direction==="top"?0:document.documentElement.scrollHeight,behavior:"smooth"});
+});
+window.addEventListener("scroll",updateFloatScrollButton,{passive:true});
+window.addEventListener("resize",updateFloatScrollButton);
 $("#specialYear").addEventListener("change",renderSpecialStats);
-$("#patternYear").addEventListener("change",()=>deferRender(renderForecastStats,"#forecastStats"));
-$("#patternBaseDate").addEventListener("change",()=>deferRender(renderForecastStats,"#forecastStats"));
-$("#lawYear").addEventListener("change",()=>deferRender(renderPatternStats,"#patternStats"));
-$("#lawBaseDate").addEventListener("change",()=>deferRender(renderPatternStats,"#patternStats"));
+$("#patternYear").addEventListener("change",()=>{
+  patternBaseState.forecast.manual=false;
+  deferRender(renderForecastStats,"#forecastStats");
+});
+$("#patternBaseDate").addEventListener("change",()=>{
+  patternBaseState.forecast.manual=true;
+  deferRender(renderForecastStats,"#forecastStats");
+});
+$("#lawYear").addEventListener("change",()=>{
+  patternBaseState.law.manual=false;
+  deferRender(renderPatternStats,"#patternStats");
+});
+$("#lawBaseDate").addEventListener("change",()=>{
+  patternBaseState.law.manual=true;
+  deferRender(renderPatternStats,"#patternStats");
+});
 $("#lawReferenceMode").addEventListener("change",()=>{
   localStorage.setItem(LAW_MODE_KEY,$("#lawReferenceMode").value);
   deferRender(renderPatternStats,"#patternStats");
@@ -1027,7 +1279,7 @@ $("#referenceBacktestMonth").addEventListener("change",()=>{
   deferRender(renderForecastStats,"#forecastStats");
 });
 $("#resultSelect").addEventListener("change",()=>{
-  renderResultPreview();
+  renderResultPreview(null,true);
   renderHeadStats();
 });
 $("#closeResultModal").addEventListener("click",closeResultModal);
@@ -1037,6 +1289,8 @@ $("#saveCloudConfig").addEventListener("click",saveCloudConfig);
 $("#checkCloudData").addEventListener("click",checkCloudState);
 $("#loadCloudData").addEventListener("click",loadCloudState);
 $("#saveCloudData").addEventListener("click",saveCloudState);
+$("#loadCloudPredictions").addEventListener("click",loadCloudPredictions);
+$("#saveCloudPredictions").addEventListener("click",saveCloudPredictions);
 $("#copyPlayerLink").addEventListener("click",copyPlayerCloudLink);
 $("#playerLoadCloud").addEventListener("click",loadCloudForPlayer);
 document.addEventListener("keydown",e=>{if(e.key==="Escape")closeResultModal()});
@@ -1073,7 +1327,7 @@ function downloadJson(data,filename){
   URL.revokeObjectURL(a.href);
 }
 
-$("#exportBtn").addEventListener("click",()=>{
+$("#exportBtn")?.addEventListener("click",()=>{
   if(!requireAdmin())return;
   const pack=exportDataPackage();
   makeLocalBackup("export-full-data");
@@ -1106,6 +1360,7 @@ $("#importCsvBtn").addEventListener("click",async()=>{
       alert("Không đọc được dòng kết quả nào từ CSV.");
       return;
     }
+    if(stats.latestDate)$("#reportDate").value=stats.latestDate;
     save();
     alert(`Đã import ${stats.imported} ngày. Ghi đè ${stats.updated} ngày trùng. Bỏ qua ${stats.skipped} dòng lỗi.`);
   }catch(err){
@@ -1136,7 +1391,7 @@ $("#importDataFile").addEventListener("change",e=>{
   };
   rd.readAsText(f);
 });
-$("#importFile").addEventListener("change",e=>{
+$("#importFile")?.addEventListener("change",e=>{
   if(!requireAdmin()){e.target.value="";return}
   const f=e.target.files[0]; if(!f)return;
   const rd=new FileReader();
@@ -1247,7 +1502,6 @@ function selectedResult(){
   if(!sorted.length)return null;
   const current=$("#resultSelect").value;
   return sorted.find(r=>r.date===current)||
-    sorted.find(r=>r.date===yesterday())||
     sorted[0];
 }
 
@@ -1268,7 +1522,7 @@ function lotoNumbers(result){
 function renderMembers(){
   const members=visibleMembers();
   if(!isAdmin&&!currentPlayer()){
-    $("#memberList").innerHTML='<p class="muted">Đăng nhập hoặc đăng ký để xem sổ của bạn.</p>';
+    $("#memberList").innerHTML='<p class="muted">Đăng nhập QTV để quản lý người chơi.</p>';
     $("#entryMember").innerHTML='<option value="">Đăng nhập trước</option>';
     $("#entryMember").disabled=true;
     return;
@@ -1427,12 +1681,12 @@ function toggleDayDetail(id){
 }
 window.toggleDayDetail=toggleDayDetail;
 
-function renderResultPreview(tempImage){
+function renderResultPreview(tempImage,preserveSelection=false){
   const sorted=stateCache.resultsDesc;
   const selectedDate=$("#resultSelect").value;
   $("#resultSelect").innerHTML=sorted.length?sorted.map(r=>`<option value="${r.date}">${displayDate(r.date)}</option>`).join(""):'<option>Chưa có kết quả</option>';
-  if(sorted.some(r=>r.date===selectedDate)) $("#resultSelect").value=selectedDate;
-  else if(sorted.some(r=>r.date===yesterday())) $("#resultSelect").value=yesterday();
+  if(preserveSelection&&sorted.some(r=>r.date===selectedDate)) $("#resultSelect").value=selectedDate;
+  else if(sorted[0]) $("#resultSelect").value=sorted[0].date;
   const chosen=selectedResult();
   if(chosen) $("#resultSelect").value=chosen.date;
   $("#resultPreview").innerHTML=chosen?`
@@ -1532,24 +1786,56 @@ function renderHeadStats(){
 function renderResultStats(){
   const entries=visibleEntries(state.entries);
   const all=aggregate(entries);
-  const dates=stateCache.resultsDesc.map(r=>r.date);
+  const allDates=stateCache.resultsDesc.map(r=>r.date);
+  const dates=filterResultStatDates(allDates);
+  const rangeLabel=resultStatsRangeLabel($("#resultStatsRange").value,dates.length,allDates.length);
   $("#resultStats").innerHTML=`
     <div class="stat-grid">
       <div class="stat-card">Ngày có kết quả<strong>${state.results.length}</strong></div>
       <div class="stat-card">Lượt đã nhập<strong>${entries.length}</strong></div>
       <div class="stat-card">Lượt chờ chấm<strong>${all.pending}</strong></div>
     </div>
+    <p class="muted result-range-note">${rangeLabel}</p>
     <div class="result-list">
       ${dates.length?dates.map(date=>{
         const r=resultForDate(date);
         const dayEntries=entries.filter(e=>e.date===date);
         const a=aggregate(dayEntries);
-        return `<div class="result-item">
-          <div><strong>${displayDate(date)}</strong><br><small>ĐB ${esc(r.special)} · ${r.prizes.length} giải · ${dayEntries.length} lượt</small></div>
-          <span class="pill">${a.hits} lần trúng</span>
+        const hasHit=a.hits>0;
+        return `<div class="result-item ${hasHit?'result-hit':''}">
+          <div><strong>${displayDate(date)}</strong><br><small>ĐB ${esc(r.special)} · ${r.prizes.length} giải · ${dayEntries.length} lượt</small>${hasHit?'<br><small class="hit-note">Dự đoán đúng</small>':""}</div>
+          <span class="pill ${hasHit?'hit-pill':''}">${hasHit?`Dự đoán đúng ${a.hits} lần`:`${a.hits} lần trúng`}</span>
         </div>`;
       }).join(""):'<p class="muted">Chưa có kết quả đã lưu.</p>'}
     </div>`;
+}
+
+function filterResultStatDates(dates){
+  const range=$("#resultStatsRange")?.value||"7";
+  if(range==="7")return dates.slice(0,7);
+  if(range==="all")return dates;
+  const base=dates[0]||today();
+  let start="";
+  if(range==="week")start=dateAdd(base,-6);
+  else if(range==="month")start=`${base.slice(0,7)}-01`;
+  else if(range==="quarter"){
+    const year=Number(base.slice(0,4));
+    const month=Number(base.slice(5,7));
+    const qStart=String(Math.floor((month-1)/3)*3+1).padStart(2,"0");
+    start=`${year}-${qStart}-01`;
+  }else if(range==="year")start=`${base.slice(0,4)}-01-01`;
+  return start?dates.filter(date=>date>=start&&date<=base):dates.slice(0,7);
+}
+
+function resultStatsRangeLabel(range,count,total){
+  const labels={7:"7 ngày gần nhất",week:"tuần gần nhất",month:"tháng này",quarter:"quý này",year:"năm này",all:"tất cả"};
+  return `Đang hiển thị ${count}/${total} ngày: ${labels[range]||labels["7"]}.`;
+}
+
+function dateAdd(date,days){
+  const d=new Date(`${date}T00:00:00`);
+  d.setDate(d.getDate()+days);
+  return localDate(d);
 }
 
 function daysBetween(from,to){
@@ -1668,6 +1954,25 @@ function renderLawYearOptions(){
   if(!years.includes(thisYear))years.unshift(thisYear);
   select.innerHTML=`<option value="all">Tất cả</option>`+years.map(y=>`<option value="${y}">${y}</option>`).join("");
   select.value=current==="all"||years.includes(current)?current:"all";
+}
+
+function syncPatternBaseDate(kind,inputSelector,yearSelector){
+  const tracker=patternBaseState[kind];
+  const input=$(inputSelector);
+  const yearSelect=$(yearSelector);
+  const latest=stateCache.resultsDesc[0]?.date||"";
+  if(!input)return "";
+  if(latest&&tracker.latest!==latest){
+    tracker.latest=latest;
+    tracker.manual=false;
+  }
+  if(latest&&(!tracker.manual||!input.value||!stateCache.resultsByDate.has(input.value))){
+    input.value=latest;
+  }
+  if(latest&&yearSelect&&yearSelect.value!=="all"&&!latest.startsWith(`${yearSelect.value}-`)){
+    yearSelect.value=latest.slice(0,4);
+  }
+  return input.value;
 }
 
 function addDate(date,days){
@@ -1895,6 +2200,7 @@ function getPatternContext(yearValue,baseDateValue){
 
 function renderForecastStats(){
   renderPatternYearOptions();
+  syncPatternBaseDate("forecast","#patternBaseDate","#patternYear");
   const {year,results,byDate,baseResult,rows}=getPatternContext($("#patternYear").value,$("#patternBaseDate").value);
   if(baseResult&&$("#patternBaseDate").value!==baseResult.date)$("#patternBaseDate").value=baseResult.date;
   const autoRows=baseResult?buildAutoRowsForBase(baseResult,results,byDate):[];
@@ -1943,6 +2249,7 @@ function renderForecastStats(){
 
 function renderPatternStats(){
   renderLawYearOptions();
+  syncPatternBaseDate("law","#lawBaseDate","#lawYear");
   const {year,results,byDate,baseResult,rows}=getPatternContext($("#lawYear").value,$("#lawBaseDate").value);
   if(baseResult&&$("#lawBaseDate").value!==baseResult.date)$("#lawBaseDate").value=baseResult.date;
   const allocation=buildLawAllocation(rows,$("#lawReferenceMode").value);
@@ -2491,8 +2798,10 @@ function renderPatternTable(rows){
 }
 
 function renderReport(){
+  const allVisibleEntries=visibleEntries(state.entries);
+  renderReportDateOptions(allVisibleEntries);
   const filter=$("#reportDate").value;
-  const entries=visibleEntries(state.entries).filter(e=>!filter||e.date===filter);
+  const entries=allVisibleEntries.filter(e=>!filter||e.date===filter);
   const total=aggregate(entries);
   const net=total.reward-total.cost;
   const members=visibleMembers();
@@ -2512,6 +2821,19 @@ function renderReport(){
   renderPredictionSummary(entries);
 }
 
+function latestEntryDate(entries){
+  return [...new Set(entries.map(e=>e.date).filter(Boolean))].sort((a,b)=>b.localeCompare(a))[0]||"";
+}
+
+function renderReportDateOptions(entries){
+  const select=$("#reportDate");
+  if(!select)return;
+  const selected=select.value;
+  const dates=[...new Set(entries.map(e=>e.date).filter(Boolean))].sort((a,b)=>b.localeCompare(a));
+  select.innerHTML=dates.length?dates.map(date=>`<option value="${date}">${displayDate(date)}</option>`).join(""):'<option value="">Chưa có dự đoán</option>';
+  select.value=dates.includes(selected)?selected:(dates[0]||"");
+}
+
 function renderPredictionSummary(entries){
   const target=$("#predictionSummary");
   if(!target)return;
@@ -2525,27 +2847,29 @@ function renderPredictionSummary(entries){
     byDate.get(entry.date).push(entry);
   });
   target.innerHTML=`<div class="prediction-summary-list">${[...byDate.entries()].map(([date,dayEntries])=>{
+    const hasResult=Boolean(resultForDate(date));
     const members=visibleMembers().filter(m=>dayEntries.some(e=>e.memberId===m.id));
     return members.map(member=>{
       const memberEntries=dayEntries.filter(e=>e.memberId===member.id);
       const total=aggregate(memberEntries);
       const net=total.reward-total.cost;
+      const hasPending=total.pending>0;
       const correct=countCorrectPredictions(memberEntries);
       const summaryRows=buildPredictionSummaryRows(memberEntries);
       const copyText=summaryRows.map(row=>row.copy).join("\n");
       return `<article class="prediction-summary-card">
         <div class="prediction-summary-head">
-          <div><strong>${displayDate(date)}</strong><span>${esc(member.name)}</span></div>
+          <div><strong>${displayDate(date)}</strong><span>${esc(member.name)}</span><span class="${hasResult?'result-ready':'result-missing'}">${hasResult?'Đã có KQ':'Chưa có KQ'}</span></div>
           <button class="secondary prediction-copy" type="button" data-text="${esc(copyText)}" onclick="copyPredictionSummary(this.dataset.text)">Copy</button>
         </div>
         <div class="prediction-summary-metrics">
           <span>Dự đoán đúng <b>${correct}/${memberEntries.length}</b></span>
           <span>Trúng <b>${total.hits}</b> lần</span>
           <span>Điểm trừ <b class="negative">${total.cost}</b></span>
-          <span>Điểm cộng <b class="positive">${total.reward}</b></span>
-          <span>Thành tiền <b class="${net>=0?'positive':'negative'}">${net>=0?'+':''}${net}</b></span>
+          <span>Điểm cộng <b class="positive">${hasPending?"-":total.reward}</b></span>
+          <span>Thành tiền <b class="${hasPending?'pending':net>=0?'positive':'negative'}">${hasPending?"Chờ KQ":`${net>=0?'+':''}${net}`}</b></span>
         </div>
-        <div class="prediction-lines">${summaryRows.map(renderPredictionSummaryLine).join("")}</div>
+        <div class="prediction-lines">${renderPredictionSummaryGroups(summaryRows)}</div>
       </article>`;
     }).join("");
   }).join("")}</div>`;
@@ -2577,38 +2901,52 @@ function buildPredictionSummaryRows(entries){
     grouped.get(key).push(entry);
   });
   [...grouped.values()]
-    .sort((a,b)=>(a[0].type==="lo"?0:1)-(b[0].type==="lo"?0:1)||a[0].points-b[0].points)
+    .sort((a,b)=>(a[0].type==="lo"?0:1)-(b[0].type==="lo"?0:1)||b[0].points-a[0].points)
     .forEach(group=>{
       const numbers=[...new Set(group.map(e=>e.number))].sort().join(" - ");
       rows.push(buildPredictionLineRow(group[0].type,numbers,group[0].points,false,group));
     });
-  return rows.sort((a,b)=>(a.type==="lo"?0:1)-(b.type==="lo"?0:1));
+  return rows.sort((a,b)=>(a.type==="lo"?0:1)-(b.type==="lo"?0:1)||b.points-a.points);
 }
 
 function buildPredictionLineRow(type,numbers,points,isBatch,entries){
   const suffix=type==="lo"?"đ":"k";
   const total=aggregate(entries);
-  const net=total.reward-total.cost;
+  const pending=total.pending>0;
+  const net=pending?null:total.reward-total.cost;
   return {
     type,
     numbers,
     points,
-    copy:`${numbers} ${points}${suffix}`,
+    copy:`${type==="lo"?"L":"Đ"}: ${numbers} - ${points}${suffix}`,
     cost:total.cost,
     reward:total.reward,
     net,
     hits:total.hits,
-    count:entries.length
+    count:entries.length,
+    pending
   };
 }
 
+function renderPredictionSummaryGroups(rows){
+  return ["lo","de"].map(type=>{
+    const group=rows.filter(row=>row.type===type);
+    if(!group.length)return "";
+    return `<div class="prediction-kind">
+      <h4>${type==="lo"?"Lô":"Đề"}</h4>
+      ${group.map(renderPredictionSummaryLine).join("")}
+    </div>`;
+  }).join("");
+}
+
 function renderPredictionSummaryLine(row){
+  const money=row.pending?'<b class="pending">Chờ KQ</b>':`<b class="${row.net>=0?'positive':'negative'}">${row.net>=0?'+':''}${row.net}</b>`;
   return `<div class="prediction-line">
     <strong>${esc(row.copy)}</strong>
-    <span>Đúng <b>${row.hits}</b></span>
+    <span>Đúng <b>${row.pending?"-":row.hits}</b></span>
     <span>Trừ <b class="negative">${row.cost}</b></span>
-    <span>Cộng <b class="positive">${row.reward}</b></span>
-    <span>Thành tiền <b class="${row.net>=0?'positive':'negative'}">${row.net>=0?'+':''}${row.net}</b></span>
+    <span>Cộng <b class="positive">${row.pending?"-":row.reward}</b></span>
+    <span>Thành tiền ${money}</span>
   </div>`;
 }
 
@@ -2660,6 +2998,7 @@ function render(){
     renderLeaderboard();
   }
   updateStorageStatus();
+  updateFloatScrollButton();
   renderAdminState();
 }
 initPersistentState();

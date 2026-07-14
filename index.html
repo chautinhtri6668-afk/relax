@@ -8,16 +8,22 @@
 </head>
 <body>
 <header>
-  <div>
+  <div class="brand-block">
     <h1>THẦN SỐ HỌC</h1>
     <p>Theo dõi, dự đoán, thống kê, báo cáo số học.</p>
+    <nav class="tabs header-tabs" aria-label="Chức năng chính">
+      <button class="tab active" type="button" data-tab="predict">Dự đoán</button>
+      <button class="tab" type="button" data-tab="stats">Thống kê</button>
+      <button class="tab" type="button" data-tab="report">Báo cáo</button>
+    </nav>
   </div>
   <div class="head-actions">
     <form id="playerLoginForm" class="player-login">
       <button id="playerLoadCloud" class="secondary" type="button">Tải cloud</button>
       <select id="playerLoginMember" aria-label="Người chơi"></select>
       <input id="playerLoginPassword" type="password" placeholder="Mật khẩu người chơi" autocomplete="current-password">
-      <button type="submit">Vào</button>
+      <button type="submit">Đăng nhập</button>
+      <button id="jumpAdminLogin" class="secondary" type="button">QTV</button>
     </form>
     <div id="playerSession" class="session-chip hidden"></div>
     <span id="storageStatus" class="storage-status">Đang kiểm tra lưu trữ...</span>
@@ -30,29 +36,8 @@
     Lô: trừ 23, trúng +80 mỗi điểm. Đề: trúng +80 lần điểm ghi.
   </section>
 
-  <nav class="tabs" aria-label="Chức năng chính">
-    <button class="tab active" type="button" data-tab="predict">Dự đoán</button>
-    <button class="tab" type="button" data-tab="stats">Thống kê</button>
-    <button class="tab" type="button" data-tab="report">Báo cáo</button>
-  </nav>
-
   <section id="tab-predict" class="tab-panel active">
     <div class="grid two">
-      <article class="card">
-        <h2>Người chơi</h2>
-        <form id="memberForm" class="inline admin-only">
-          <input id="memberName" maxlength="40" placeholder="Tên thành viên" required>
-          <input id="memberPassword" type="password" maxlength="40" placeholder="Mật khẩu">
-          <button>Thêm</button>
-        </form>
-        <form id="playerRegisterForm" class="player-register">
-          <input id="playerName" maxlength="40" placeholder="Tên người chơi" required>
-          <input id="playerPassword" type="password" minlength="4" maxlength="40" placeholder="Mật khẩu riêng" required>
-          <button type="submit">Đăng ký</button>
-        </form>
-        <div id="memberList"></div>
-      </article>
-
       <article class="card">
         <h2>Ghi số</h2>
         <form id="entryForm" class="entry-form">
@@ -77,6 +62,18 @@
             <span id="quickEntryStatus" class="muted"></span>
           </div>
         </div>
+      </article>
+
+      <article class="card analyze-entry">
+        <h2>Phân tích số chọn</h2>
+        <label>Dãy số
+          <textarea id="analyzeNumbersText" rows="5" placeholder="05 13 67 76-31-50"></textarea>
+        </label>
+        <div class="inline">
+          <button id="analyzeNumbersBtn" type="button">Phân tích xác suất</button>
+          <span class="muted">Copy dãy và phân bổ điểm để ghi dự đoán.</span>
+        </div>
+        <div id="analyzeNumbersResult" class="manual-analysis"></div>
       </article>
     </div>
 
@@ -129,7 +126,19 @@
       </div>
 
       <section class="card">
-        <h2>Đã lưu</h2>
+        <div class="section-head">
+          <h2>Đã lưu</h2>
+          <label>Hiển thị
+            <select id="resultStatsRange">
+              <option value="7">7 ngày gần nhất</option>
+              <option value="week">Tuần này</option>
+              <option value="month">Tháng này</option>
+              <option value="quarter">Quý này</option>
+              <option value="year">Năm này</option>
+              <option value="all">Tất cả</option>
+            </select>
+          </label>
+        </div>
         <div id="resultStats"></div>
       </section>
     </section>
@@ -220,8 +229,8 @@
       <div class="section-head">
         <h2>Báo cáo</h2>
         <div class="inline">
-          <input id="reportDate" type="date">
-          <button id="clearReportDate" class="secondary" type="button">Tất cả</button>
+          <select id="reportDate" aria-label="Chọn ngày báo cáo"></select>
+          <button id="clearReportDate" class="secondary" type="button">Mới nhất</button>
         </div>
       </div>
       <div id="reportCards" class="report-cards"></div>
@@ -239,36 +248,37 @@
   </section>
 </main>
 
-<section class="admin-login-footer">
-  <form id="adminForm" class="admin-login">
-    <input id="adminPassword" type="password" placeholder="Mật khẩu QTV" autocomplete="current-password">
-    <button type="submit">QTV</button>
-  </form>
-</section>
+<button id="topBtn" class="top-btn" type="button">Bottom</button>
 
-<footer id="adminPanel" class="admin-panel admin-only">
+<footer id="adminPanel" class="admin-panel">
   <div class="admin-panel-inner">
-    <div class="section-head">
+    <div class="admin-login-box">
+      <div>
+        <h2>Quản trị viên</h2>
+        <p class="muted">Đăng nhập để quản lý người chơi, cloud và dữ liệu.</p>
+      </div>
+      <form id="adminForm" class="admin-login">
+        <input id="adminPassword" type="password" placeholder="Mật khẩu QTV" autocomplete="current-password">
+        <button type="submit">Đăng nhập QTV</button>
+      </form>
+    </div>
+    <div class="section-head admin-only">
       <div>
         <h2>Quản trị</h2>
         <p class="muted">Đồng bộ cloud, xuất nhập dữ liệu và cập nhật kết quả.</p>
       </div>
       <button id="adminLogout" class="secondary" type="button">Thoát QTV</button>
     </div>
-    <div class="admin-tools">
-      <button id="exportBtn" class="secondary" type="button">Xuất toàn bộ</button>
-      <button id="exportDataBtn" class="secondary" type="button">Export data</button>
-      <button id="exportResultsBtn" class="secondary" type="button">Xuất KQ</button>
-      <button id="importCsvBtn" class="secondary" type="button">Cập nhật CSV</button>
-      <button id="restoreBackupBtn" class="secondary" type="button">Khôi phục backup</button>
-      <label class="import-label">Import data
-        <input id="importDataFile" type="file" accept=".json">
-      </label>
-      <label class="import-label">Nhập file
-        <input id="importFile" type="file" accept=".json">
-      </label>
+    <div class="admin-members admin-only">
+      <h3>Người chơi</h3>
+      <form id="memberForm" class="inline">
+        <input id="memberName" maxlength="40" placeholder="Tên người chơi" required>
+        <input id="memberPassword" type="password" maxlength="40" placeholder="Mật khẩu">
+        <button>Thêm</button>
+      </form>
+      <div id="memberList"></div>
     </div>
-    <div class="cloud-form">
+    <div class="cloud-form admin-only">
       <h3>Google Sheet Cloud</h3>
       <div class="cloud-grid">
         <label>Apps Script Web App URL
@@ -278,14 +288,42 @@
           <input id="cloudToken" type="password" placeholder="Token trong Apps Script">
         </label>
       </div>
-      <div class="inline">
-        <button id="saveCloudConfig" type="button">Lưu cấu hình</button>
-        <button id="checkCloudData" class="secondary" type="button">Kiểm tra cloud</button>
-        <button id="loadCloudData" class="secondary" type="button">Tải cloud</button>
-        <button id="saveCloudData" class="secondary" type="button">Lưu cloud</button>
-        <button id="copyPlayerLink" class="secondary" type="button">Copy link người chơi</button>
+      <div class="admin-groups">
+        <div class="admin-group">
+          <h4>Cấu hình</h4>
+          <button id="saveCloudConfig" type="button">Lưu cấu hình</button>
+          <button id="checkCloudData" class="secondary" type="button">Kiểm tra cloud</button>
+          <button id="copyPlayerLink" class="secondary" type="button">Copy link người chơi</button>
+        </div>
+        <div class="admin-group">
+          <h4>Cloud toàn bộ</h4>
+          <button id="loadCloudData" class="secondary" type="button">Tải cloud</button>
+          <button id="saveCloudData" class="secondary" type="button">Lưu cloud</button>
+        </div>
+        <div class="admin-group">
+          <h4>Cloud dự đoán</h4>
+          <button id="loadCloudPredictions" class="secondary" type="button">Lấy cloud dự đoán</button>
+          <button id="saveCloudPredictions" class="secondary" type="button">Lưu cloud dự đoán</button>
+        </div>
       </div>
-      <p id="cloudStatus" class="muted">Cloud dùng để đồng bộ người chơi, lượt dự đoán và kết quả giữa nhiều máy.</p>
+      <div id="cloudStatus" class="cloud-status-note">Cloud dùng để đồng bộ người chơi, lượt dự đoán và kết quả giữa nhiều máy.</div>
+    </div>
+    <div class="admin-tools admin-only">
+      <div class="admin-groups admin-groups-two">
+        <div class="admin-group">
+          <h4>Sao lưu</h4>
+          <button id="exportDataBtn" class="secondary" type="button">Export data</button>
+          <label class="import-label">Import data
+            <input id="importDataFile" type="file" accept=".json">
+          </label>
+          <button id="restoreBackupBtn" class="secondary" type="button">Khôi phục gần nhất</button>
+        </div>
+        <div class="admin-group">
+          <h4>Kết quả</h4>
+          <button id="importCsvBtn" class="secondary" type="button">Cập nhật CSV</button>
+          <button id="exportResultsBtn" class="secondary" type="button">Xuất kết quả</button>
+        </div>
+      </div>
     </div>
   </div>
 </footer>
