@@ -63,6 +63,11 @@ button:hover,.import-label:hover{filter:brightness(.96)}.secondary{background:#3
 .manual-analysis-card{border:1px solid #bae6fd;border-radius:8px;background:#fff;padding:10px}
 .manual-analysis-head{display:flex;justify-content:space-between;gap:10px;align-items:flex-start;margin-bottom:8px}
 .manual-analysis-head strong{color:#0f172a;font-size:15px}.manual-analysis-head small{color:var(--muted);font-weight:700;text-align:right}
+.manual-analysis-actions,.reference-head-actions{display:flex;align-items:flex-end;gap:7px;flex-direction:column}.manual-analysis-actions button,.reference-head-actions button{padding:5px 8px;font-size:12px}
+.allocation-mode-switch{display:flex;gap:5px;margin-top:8px}.allocation-mode-switch button{padding:5px 9px;background:#e2e8f0;color:#334155;font-size:12px}.allocation-mode-switch button.active{background:#ea580c;color:#fff}
+.allocation-toolbar{display:flex;justify-content:space-between;align-items:center;gap:10px;margin:10px 0 7px;padding:9px 10px;border:1px solid #fed7aa;border-radius:8px;background:#fff7ed}.allocation-toolbar-actions{display:flex;align-items:center;gap:7px}.allocation-toolbar .allocation-mode-switch{margin-top:0}.allocation-toolbar button{padding:5px 8px;font-size:12px}
+.hit-number{display:inline-block;padding:2px 6px;border-radius:999px;background:#dcfce7;color:#15803d;font-weight:850}
+.manual-analysis-head .allocation-mode-switch,.manual-analysis-head .manual-analysis-actions,.reference-head .reference-head-actions{display:none}
 .manual-analysis-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px}
 .manual-analysis-group{border:1px solid #e2e8f0;border-radius:8px;background:#fff;padding:9px}
 .manual-analysis-group h4{margin:0 0 8px;color:#111827}
@@ -141,6 +146,11 @@ button:hover,.import-label:hover{filter:brightness(.96)}.secondary{background:#3
 .reference-numbers span small{margin-left:4px;color:#475569;font-weight:800}
 .reference-group small{display:block;margin-top:8px;font-weight:700;color:#475569;word-break:break-all}
 .reference-numbers span small{display:inline;margin-top:0;word-break:normal}
+.reference-numbers span.editable-stake{display:inline-flex;align-items:center;gap:6px;padding-right:5px}
+.stake-stepper{display:inline-flex!important;align-items:center;gap:2px;border:0!important;background:transparent!important;padding:0!important}
+.stake-stepper button{width:25px;height:25px;padding:0;border-radius:50%;font-size:17px;line-height:1;background:#fff;border:1px solid #cbd5e1;color:#334155}
+.stake-stepper input{width:48px;height:27px;padding:2px 4px;text-align:center;border:1px solid #cbd5e1;border-radius:6px;font-weight:800;color:#0f172a;background:#fff}
+.stake-stepper input::-webkit-inner-spin-button{display:none}
 .special-year-table-wrap{overflow:auto;margin-bottom:14px;border:2px solid #777;background:#fff}
 .special-year-title{background:#ed1c24;color:#fff;text-align:center;font-weight:750;padding:8px}
 .special-year-table{width:100%;border-collapse:collapse;min-width:760px}
@@ -184,6 +194,7 @@ button:hover,.import-label:hover{filter:brightness(.96)}.secondary{background:#3
 .modal-loto-table tbody td{font-size:13px;padding:4px 6px;line-height:1.25}
 small,.muted{color:var(--muted)}
 @media(max-width:850px){
+  .allocation-toolbar,.allocation-toolbar-actions{align-items:stretch;flex-direction:column}
   header,.section-head{align-items:flex-start;flex-direction:column}
   header{justify-content:flex-start}
   .two,.entry-form,.stat-grid,.report-cards,.loto-stats,.special-stat-grid,.pattern-grid,.manual-analysis-grid{grid-template-columns:1fr}

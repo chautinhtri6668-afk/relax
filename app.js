@@ -739,17 +739,35 @@ function renderManualNumberAnalysis(){
     return;
   }
   const {baseResult,allocation}=analysis;
+  const combinedText=combinedReferenceCopyText(analysis.lo,analysis.de);
   target.innerHTML=`<div class="manual-analysis-card">
     <div class="manual-analysis-head">
-      <strong>Soi từ kết quả mới nhất ${displayDate(baseResult.date)}</strong>
-      <small>Gợi ý cho ${displayDate(allocation.forecastDate)} · trừ ${allocation.totalCost} điểm</small>
+      <div><strong>Soi từ kết quả mới nhất ${displayDate(baseResult.date)}</strong>
+        <div class="allocation-mode-switch">
+          <button type="button" data-manual-mode="fun" class="${allocation.mode.includes('Đánh vui')?'active':''}">Đánh vui</button>
+          <button type="button" data-manual-mode="strong" class="${allocation.mode.includes('Kết mạnh')?'active':''}">Kết mạnh</button>
+        </div>
+      </div>
+      <div class="manual-analysis-actions"><small>Gợi ý cho ${displayDate(allocation.forecastDate)} · trừ ${allocation.totalCost} điểm</small>
+        <button class="secondary" type="button" data-copy-all data-text="${esc(combinedText)}" onclick="copyReferenceText(this.dataset.text)">Copy cả lô + đề</button>
+      </div>
     </div>
     ${renderReferenceSignal(allocation.signal)}
     ${renderReferencePerformance(allocation.performance)}
     ${renderReferencePool(allocation.pool)}
+    <div class="allocation-toolbar">
+      <strong data-allocation-total>Gợi ý cho ${displayDate(allocation.forecastDate)} · trừ ${allocation.totalCost} điểm</strong>
+      <div class="allocation-toolbar-actions">
+        <div class="allocation-mode-switch">
+          <button type="button" data-manual-mode="fun" class="${allocation.mode.includes('Đánh vui')?'active':''}">Đánh vui</button>
+          <button type="button" data-manual-mode="strong" class="${allocation.mode.includes('Kết mạnh')?'active':''}">Kết mạnh</button>
+        </div>
+        <button class="secondary" type="button" data-copy-all data-text="${esc(combinedText)}" onclick="copyReferenceText(this.dataset.text)">Copy cả lô + đề</button>
+      </div>
+    </div>
     <div class="reference-grid">
-      ${renderReferenceGroup("Lô phân bổ",analysis.lo,"lo")}
-      ${renderReferenceGroup("Đề phân bổ",analysis.de,"de")}
+      ${renderReferenceGroup("Lô phân bổ",analysis.lo,"lo",true)}
+      ${renderReferenceGroup("Đề phân bổ",analysis.de,"de",true)}
     </div>
     <div class="manual-analysis-grid">
       <div class="manual-analysis-group">
@@ -1435,7 +1453,7 @@ function calc(entry){
 function hitLabel(entry,calcResult){
   if(calcResult.hits===null)return "-";
   if(entry.type==="de")return calcResult.hits?"Trúng":"Trượt";
-  if(calcResult.hits)return `${calcResult.hits} lần (${calcResult.matches.map(esc).join(", ")})`;
+  if(calcResult.hits)return `${calcResult.hits} lần · <span class="hit-number">${esc(entry.number)}</span> (${calcResult.matches.map(esc).join(", ")})`;
   return `0 lần - không thấy ${entry.number}`;
 }
 
@@ -1613,20 +1631,15 @@ function renderEntryDetails(entries){
 }
 
 function buildEntryDetailRows(entries){
-  const rows=[];
-  const used=new Set();
+  const grouped=new Map();
   entries.forEach(entry=>{
-    if(used.has(entry.id))return;
-    if(entry.batchId){
-      const group=entries.filter(x=>x.batchId===entry.batchId);
-      group.forEach(x=>used.add(x.id));
-      rows.push({kind:"group",entries:group});
-      return;
-    }
-    used.add(entry.id);
-    rows.push({kind:"single",entries:[entry]});
+    const key=`${entry.memberId}|${entry.type}|${entry.points}`;
+    if(!grouped.has(key))grouped.set(key,[]);
+    grouped.get(key).push(entry);
   });
-  return rows;
+  return [...grouped.values()]
+    .sort((a,b)=>(a[0].type==="lo"?0:1)-(b[0].type==="lo"?0:1)||b[0].points-a[0].points)
+    .map(group=>({kind:group.length>1?"group":"single",entries:group}));
 }
 
 function renderGroupedEntryDetail(entries){
@@ -1646,17 +1659,18 @@ function renderGroupedEntryDetail(entries){
   });
   const status=pending?'<span class="pending">Chờ kết quả</span>':
     `<span class="${net>=0?'positive':'negative'}">${net>=0?'+':''}${net}</span>`;
+  const highlightedMatches=entries.filter(entry=>calc(entry).hits>0)
+    .map(entry=>`<span class="hit-number">${esc(entry.number)}</span>`).join(", ");
   const hitText=pending?"-":first.type==="de"?
     `${hits} con trúng${matches.length?` (${matches.map(esc).join(", ")})`:""}`:
-    `${hits} lần${matches.length?` (${matches.map(esc).join(", ")})`:""}`;
+    `${hits} lần${highlightedMatches?` · ${highlightedMatches}`:""}${matches.length?` (${matches.map(esc).join(", ")})`:""}`;
   const ids=entries.map(e=>e.id).join(",");
-  const totalPoints=entries.reduce((sum,e)=>sum+e.points,0);
-  const numbers=first.batchLabel||groupNumbersLabel(entries);
+  const numbers=groupNumbersLabel(entries);
   return `<tr>
     <td>${esc(memberName(first.memberId))}</td>
     <td>${first.type==="lo"?"Lô":"Đề"}</td>
     <td><strong>${esc(numbers)}</strong></td>
-    <td>${totalPoints}</td>
+    <td>${first.points} / số</td>
     <td>${hitText}</td>
     <td>${cost}</td>
     <td>${pending?"-":reward}</td>
@@ -2632,16 +2646,28 @@ function referenceCopyText(picks,type){
     .join("\n");
 }
 
+function combinedReferenceCopyText(loPicks,dePicks){
+  const lo=referenceCopyText(loPicks,"lo");
+  const de=referenceCopyText(dePicks,"de");
+  return [lo&&`Lô:\n${lo}`,de&&`Đề:\n${de}`].filter(Boolean).join("\n");
+}
+
 function renderReferenceNumbers(loPicks,dbPicks,allocation){
   if(!loPicks.length&&!dbPicks.length&&!allocation.pool?.length&&!allocation.monthly)return "";
   return `<div class="reference-box">
     <div class="reference-head">
       <h3>Phân bổ điểm tham khảo</h3>
-      <small>${allocation.mode} · mục tiêu ${allocation.target} · đang trừ ${allocation.totalCost}</small>
+      <div class="reference-head-actions"><small>${allocation.mode} · mục tiêu ${allocation.target} · đang trừ ${allocation.totalCost}</small>
+        <button class="secondary" type="button" data-text="${esc(combinedReferenceCopyText(loPicks,dbPicks))}" onclick="copyReferenceText(this.dataset.text)">Copy cả lô + đề</button>
+      </div>
     </div>
     ${renderReferenceSignal(allocation.signal)}
     ${renderReferencePool(allocation.pool)}
     ${renderReferencePerformance(allocation.performance)}
+    <div class="allocation-toolbar">
+      <strong>${allocation.mode} · mục tiêu ${allocation.target} · đang trừ ${allocation.totalCost}</strong>
+      <button class="secondary" type="button" data-text="${esc(combinedReferenceCopyText(loPicks,dbPicks))}" onclick="copyReferenceText(this.dataset.text)">Copy cả lô + đề</button>
+    </div>
     <div class="reference-grid">
       ${renderReferenceGroup("Lô tham khảo",loPicks,"lo")}
       ${renderReferenceGroup("Đề tham khảo",dbPicks,"de")}
@@ -2715,27 +2741,89 @@ function renderReferenceMonthBacktest(backtest){
   </div>`;
 }
 
-function renderReferenceGroup(title,picks,type){
+function renderReferenceGroup(title,picks,type,editable=false){
   const text=referenceCopyText(picks,type);
   const cost=referenceCost(picks,type);
   const top=picks[0];
   const bestNet=top?top.stake*80-cost:0;
-  return `<div class="reference-group">
+  return `<div class="reference-group"${editable?` data-allocation-type="${type}"`:""}>
     <div class="reference-title">
       <strong>${title}</strong>
-      ${picks.length?`<button class="secondary" type="button" data-text="${esc(text)}" onclick="copyReferenceText(this.dataset.text)">Copy</button>`:""}
     </div>
     <div class="reference-metrics">
-      <span>${type==="lo"?"Điểm trừ tối đa":"Vốn đề"}: <strong>${cost}</strong></span>
-      ${top?`<span>Trúng top 1: <strong class="${bestNet>=0?'positive':'negative'}">${bestNet>=0?'+':''}${bestNet}</strong></span>`:""}
+      <span>${type==="lo"?"Điểm trừ tối đa":"Vốn đề"}: <strong data-allocation-cost>${cost}</strong></span>
+      ${top?`<span>Trúng top 1: <strong data-allocation-net class="${bestNet>=0?'positive':'negative'}">${bestNet>=0?'+':''}${bestNet}</strong></span>`:""}
     </div>
-    <div class="reference-numbers ${type}">${picks.length?picks.map(p=>`
-      <span title="Tỷ lệ tốt nhất ${Math.round(p.bestRate*100)}%, xuất hiện trong ${p.count} rule">
-        ${p.number}<small>${p.stake}${type==="de"?"k":"đ"}</small>
+    <div class="reference-numbers ${type}">${picks.length?picks.map((p,index)=>`
+      <span class="${editable?'editable-stake':''}"${editable?` data-number="${p.number}"`:""} title="Tỷ lệ tốt nhất ${Math.round(p.bestRate*100)}%, xuất hiện trong ${p.count} rule">
+        ${p.number}${editable?`<span class="stake-stepper">
+          <button type="button" aria-label="Giảm điểm số ${p.number}" data-stake-action="minus">−</button>
+          <input type="number" min="0" step="${type==="de"?10:1}" value="${p.stake}" data-stake-input data-top="${index===0?'1':'0'}" aria-label="Điểm phân bổ cho số ${p.number}">
+          <button type="button" aria-label="Tăng điểm số ${p.number}" data-stake-action="plus">+</button>
+        </span>`:`<small>${p.stake}${type==="de"?"k":"đ"}</small>`}
       </span>`).join(""):'<em>Chưa đủ dữ liệu</em>'}</div>
-    ${picks.length?`<small>${esc(text).replace(/\n/g,"<br>")}</small>`:""}
+    ${picks.length?`<small${editable?' data-allocation-summary':''}>${esc(text).replace(/\n/g,"<br>")}</small>`:""}
   </div>`;
 }
+
+function updateManualAllocation(group){
+  const type=group.dataset.allocationType;
+  const inputs=[...group.querySelectorAll("[data-stake-input]")];
+  inputs.forEach(input=>{
+    const value=Math.max(0,Number(input.value)||0);
+    input.value=String(value);
+  });
+  const cost=inputs.reduce((sum,input)=>sum+Number(input.value),0)*(type==="lo"?23:1);
+  const topStake=Number(inputs.find(input=>input.dataset.top==="1")?.value)||0;
+  const net=topStake*80-cost;
+  group.querySelector("[data-allocation-cost]").textContent=String(cost);
+  const netNode=group.querySelector("[data-allocation-net]");
+  if(netNode){
+    netNode.textContent=`${net>=0?'+':''}${net}`;
+    netNode.className=net>=0?"positive":"negative";
+  }
+  const summary=group.querySelector("[data-allocation-summary]");
+  const copyText=inputs.filter(input=>Number(input.value)>0)
+    .map(input=>`${input.closest(".editable-stake").dataset.number} ${input.value}${type==="de"?"k":"đ"}`);
+  if(summary){
+    summary.innerHTML=copyText.join("<br>")||"Chưa phân bổ điểm";
+  }
+  const allButton=document.querySelector("#analyzeNumbersResult .allocation-toolbar [data-copy-all]");
+  if(allButton){
+    const groups=[...document.querySelectorAll("#analyzeNumbersResult [data-allocation-type]")];
+    allButton.dataset.text=groups.map(item=>{
+      const label=item.dataset.allocationType==="lo"?"Lô":"Đề";
+      const lines=[...item.querySelectorAll("[data-stake-input]")].filter(node=>Number(node.value)>0)
+        .map(node=>`${node.closest(".editable-stake").dataset.number} ${node.value}${item.dataset.allocationType==="de"?"k":"đ"}`);
+      return lines.length?`${label}:\n${lines.join("\n")}`:"";
+    }).filter(Boolean).join("\n");
+  }
+  const total=[...document.querySelectorAll("#analyzeNumbersResult [data-allocation-cost]")]
+    .reduce((sum,node)=>sum+(Number(node.textContent)||0),0);
+  const totalNode=document.querySelector("#analyzeNumbersResult [data-allocation-total]");
+  if(totalNode)totalNode.textContent=totalNode.textContent.replace(/trừ\s+[\d.]+\s+điểm/i,`trừ ${total} điểm`);
+}
+
+$("#analyzeNumbersResult")?.addEventListener("click",event=>{
+  const button=event.target.closest("[data-stake-action]");
+  if(!button)return;
+  const input=button.parentElement.querySelector("[data-stake-input]");
+  const step=Number(input.step)||1;
+  input.value=String(Math.max(0,(Number(input.value)||0)+(button.dataset.stakeAction==="plus"?step:-step)));
+  updateManualAllocation(button.closest("[data-allocation-type]"));
+});
+
+$("#analyzeNumbersResult")?.addEventListener("input",event=>{
+  if(event.target.matches("[data-stake-input]"))updateManualAllocation(event.target.closest("[data-allocation-type]"));
+});
+
+$("#analyzeNumbersResult")?.addEventListener("click",event=>{
+  const button=event.target.closest("[data-manual-mode]");
+  if(!button)return;
+  $("#referenceMode").value=button.dataset.manualMode;
+  localStorage.setItem(REFERENCE_MODE_KEY,button.dataset.manualMode);
+  renderManualNumberAnalysis();
+});
 
 async function copyReferenceText(text){
   try{
@@ -2884,18 +2972,8 @@ function countCorrectPredictions(entries){
 
 function buildPredictionSummaryRows(entries){
   const rows=[];
-  const used=new Set();
-  entries.forEach(entry=>{
-    if(used.has(entry.id))return;
-    if(entry.batchId){
-      const group=entries.filter(x=>x.batchId===entry.batchId);
-      group.forEach(x=>used.add(x.id));
-      rows.push(buildPredictionLineRow(group[0].type,group[0].batchLabel||groupNumbersLabel(group),group[0].points,true,group));
-    }
-  });
-  const singles=entries.filter(e=>!used.has(e.id));
   const grouped=new Map();
-  singles.forEach(entry=>{
+  entries.forEach(entry=>{
     const key=`${entry.type}|${entry.points}`;
     if(!grouped.has(key))grouped.set(key,[]);
     grouped.get(key).push(entry);
