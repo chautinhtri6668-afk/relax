@@ -1230,6 +1230,7 @@ $("#quickEntryBtn").addEventListener("click",()=>{
     `Đã thêm ${added} lượt, tổng điểm ${addedPoints}.`;
 });
 $("#analyzeNumbersBtn")?.addEventListener("click",renderManualNumberAnalysis);
+$("#doubleBridgeWeekSelect")?.addEventListener("change",renderLongTermDoubleBridge);
 
 $("#entryType").addEventListener("change",()=>{
   $("#entryPoints").value=$("#entryType").value==="de"?10:1;
@@ -1556,6 +1557,317 @@ function renderMembers(){
     '<p class="muted">Chưa có thành viên.</p>';
   $("#entryMember").innerHTML=members.map(m=>`<option value="${m.id}">${esc(m.name)}</option>`).join("");
   $("#entryMember").disabled=!isAdmin;
+}
+
+function isSaturday(date){
+  const [year,month,day]=String(date).split("-").map(Number);
+  return new Date(year,month-1,day).getDay()===6;
+}
+
+function doublePairsFromPrize(prize){
+  const source=two(prize);
+  return [...new Set([`${source[0]}${source[0]}`,`${source[1]}${source[1]}`])];
+}
+
+function buildLongTermDoubleBacktest(){
+  const dayNames=["Chủ nhật mở tuần","Thứ Hai","Thứ Ba","Thứ Tư","Thứ Năm","Thứ Sáu","Thứ Bảy","Chủ nhật cuối tuần"];
+  const rows=dayNames.map((day,index)=>({day,index,samples:0,any:0,both:0,first:0,second:0}));
+  stateCache.results
+    .filter(result=>isSaturday(result.date)&&result.prizes?.length>=26)
+    .forEach(saturday=>{
+      const pairs=doublePairsFromPrize(saturday.prizes[25]);
+      rows.forEach((row,index)=>{
+        const result=stateCache.resultsByDate.get(addDate(saturday.date,index+1));
+        if(!result)return;
+        const drawn=new Set(lotoNumbers(result));
+        const hits=pairs.map(pair=>drawn.has(pair));
+        row.samples++;
+        if(hits.some(Boolean))row.any++;
+        if(pairs.length===2&&hits.every(Boolean))row.both++;
+        if(hits[0])row.first++;
+        if(hits[1])row.second++;
+      });
+    });
+  return rows;
+}
+
+function percent(hit,total){
+  return total?`${Math.round(hit/total*100)}%`:"-";
+}
+
+function buildDoubleBreakEvenPlan(backtest){
+  let previousStakeTotal=0;
+  let cumulativeCost=0;
+  return backtest.map(row=>{
+    // Hai cặp cùng điểm: chi phí ngày = 2 * 23 * điểm. Một cặp về = 80 * điểm.
+    const stake=Math.max(1,Math.ceil((46*previousStakeTotal)/34));
+    const dayCost=stake*46;
+    cumulativeCost+=dayCost;
+    const oneHitReward=stake*80;
+    const oneHitNet=oneHitReward-cumulativeCost;
+    previousStakeTotal+=stake;
+    return {...row,stake,dayCost,cumulativeCost,oneHitReward,oneHitNet};
+  });
+}
+
+function buildFixedDoublePlan(saturday,dayRows,stake=3,remainingStake=3,progression="double"){
+  const pairs=doublePairsFromPrize(saturday.prizes[25]);
+  const completedPairs=new Set();
+  let stopped=false,totalCost=0,totalReward=0,remainingMisses=0;
+  const rows=dayRows.map((day,index)=>{
+    const date=addDate(saturday.date,index+1);
+    const activePairs=pairs.filter(pair=>!completedPairs.has(pair));
+    if(stopped)return {...day,date,status:"stopped",cost:0,reward:0,net:0,hitPairs:[],occurrences:0,activePairs:[]};
+    const inRemainingPhase=completedPairs.size>0;
+    const stakeUsed=inRemainingPhase?(progression==="double"?remainingStake*(2**remainingMisses):progression==="increase"?remainingStake*(remainingMisses+1):remainingStake):stake;
+    const result=stateCache.resultsByDate.get(date);
+    if(!result)return {...day,date,status:"pending",cost:0,reward:0,net:0,hitPairs:[],occurrences:0,activePairs,stakeUsed};
+    const numbers=lotoNumbers(result);
+    const pairHits=activePairs.map(pair=>({pair,count:numbers.filter(number=>number===pair).length}));
+    const occurrences=pairHits.reduce((sum,item)=>sum+item.count,0);
+    const hitPairs=pairHits.filter(item=>item.count).map(item=>`${item.pair}${item.count>1?` ×${item.count}`:""}`);
+    pairHits.filter(item=>item.count).forEach(item=>completedPairs.add(item.pair));
+    const cost=activePairs.length*stakeUsed*23;
+    const reward=occurrences*stakeUsed*80;
+    totalCost+=cost;
+    totalReward+=reward;
+    if(inRemainingPhase&&!occurrences)remainingMisses++;
+    if(completedPairs.size===pairs.length||(completedPairs.size>0&&remainingStake===0))stopped=true;
+    return {...day,date,status:occurrences?"hit":"miss",cost,reward,net:reward-cost,hitPairs,occurrences,activePairs,completedCount:completedPairs.size,stakeUsed};
+  });
+  return {pairs,stake,remainingStake,progression,rows,totalCost,totalReward,net:totalReward-totalCost,stopped,completedPairs:[...completedPairs]};
+}
+
+function setDoubleBridgeAfterHitMode(value){
+  const points=Math.max(0,Number(value)||0);
+  localStorage.setItem("double-bridge-remaining-stake",String(points));
+  renderLongTermDoubleBridge();
+}
+window.setDoubleBridgeAfterHitMode=setDoubleBridgeAfterHitMode;
+function setDoubleBridgeProgression(value){
+  localStorage.setItem("double-bridge-progression",value);
+  renderLongTermDoubleBridge();
+}
+window.setDoubleBridgeProgression=setDoubleBridgeProgression;
+function setDoubleBridgeStatsRange(value){
+  localStorage.setItem("double-bridge-stats-range",value);
+  renderLongTermDoubleBridge();
+}
+window.setDoubleBridgeStatsRange=setDoubleBridgeStatsRange;
+function setDoubleBridgeStatsPeriod(value){
+  const range=localStorage.getItem("double-bridge-stats-range")||"month";
+  localStorage.setItem(`double-bridge-stats-period-${range}`,value);
+  renderLongTermDoubleBridge();
+}
+window.setDoubleBridgeStatsPeriod=setDoubleBridgeStatsPeriod;
+
+function renderLongTermDoubleBridge(){
+  const target=$("#longTermDoubleBridge");
+  if(!target)return;
+  const select=$("#doubleBridgeWeekSelect");
+  const saturdays=stateCache.resultsDesc.filter(result=>isSaturday(result.date)&&result.prizes?.length>=26);
+  if(!saturdays.length){
+    if(select)select.innerHTML='<option value="">Chưa có tuần đủ dữ liệu</option>';
+    target.innerHTML='<p class="muted">Chưa có kết quả thứ Bảy đủ Giải 7 để tạo cầu.</p>';
+    return;
+  }
+  const selectedDate=select?.value;
+  if(select){
+    select.innerHTML=saturdays.map((result,index)=>{
+      const pairs=doublePairsFromPrize(result.prizes[25]);
+      return `<option value="${result.date}">${index===0?"Mới nhất · ":""}${displayDate(result.date)} · ${pairs.join("-")}</option>`;
+    }).join("");
+    select.value=saturdays.some(result=>result.date===selectedDate)?selectedDate:saturdays[0].date;
+  }
+  const saturday=saturdays.find(result=>result.date===(select?.value||selectedDate))||saturdays[0];
+  const rawPrize=String(saturday.prizes[25]||"");
+  const pairs=doublePairsFromPrize(rawPrize);
+  const weekStart=addDate(saturday.date,1);
+  const weekEnd=addDate(saturday.date,8);
+  const backtest=buildLongTermDoubleBacktest();
+  const breakEvenPlan=buildDoubleBreakEvenPlan(backtest);
+  const latestSaturday=saturdays[0];
+  const savedRemainingStake=Number(localStorage.getItem("double-bridge-remaining-stake")??3);
+  const remainingStake=Number.isFinite(savedRemainingStake)?Math.max(0,savedRemainingStake):3;
+  const progression=["double","increase","fixed"].includes(localStorage.getItem("double-bridge-progression"))?localStorage.getItem("double-bridge-progression"):"double";
+  const fixedPlan=buildFixedDoublePlan(saturday,backtest,3,remainingStake,progression);
+  const historicalFixedPlans=saturdays.map(source=>{
+    const complete=backtest.every((_,index)=>stateCache.resultsByDate.has(addDate(source.date,index+1)));
+    if(!complete)return null;
+    const plan=buildFixedDoublePlan(source,backtest,3,remainingStake,progression);
+    return {source,plan,start:addDate(source.date,1),end:addDate(source.date,8)};
+  }).filter(Boolean);
+  const historicalTotals=historicalFixedPlans.reduce((total,item)=>{
+    total.cost+=item.plan.totalCost;
+    total.reward+=item.plan.totalReward;
+    total.net+=item.plan.net;
+    if(item.plan.net>0)total.positive++;
+    else if(item.plan.net<0)total.negative++;
+    else total.even++;
+    if(item.plan.completedPairs.length>=1)total.first++;
+    if(item.plan.completedPairs.length===item.plan.pairs.length)total.both++;
+    return total;
+  },{cost:0,reward:0,net:0,positive:0,negative:0,even:0,first:0,both:0});
+  const fixedStart=addDate(saturday.date,1);
+  const fixedEnd=addDate(saturday.date,8);
+  const statsRange=["month","quarter","year"].includes(localStorage.getItem("double-bridge-stats-range"))?localStorage.getItem("double-bridge-stats-range"):"month";
+  const [defaultStatsYear,defaultStatsMonth]=saturdays[0].date.split("-").map(Number);
+  const defaultStatsQuarter=Math.floor((defaultStatsMonth-1)/3)+1;
+  const defaultStatsPeriod=statsRange==="month"?`${defaultStatsYear}-${String(defaultStatsMonth).padStart(2,"0")}`:statsRange==="quarter"?`${defaultStatsYear}-Q${defaultStatsQuarter}`:String(defaultStatsYear);
+  const statsPeriod=localStorage.getItem(`double-bridge-stats-period-${statsRange}`)||defaultStatsPeriod;
+  const periodMatch=statsPeriod.match(/^(\d{4})(?:-(\d{2})|-Q([1-4]))?$/);
+  const statsYear=Number(periodMatch?.[1])||defaultStatsYear;
+  const statsMonth=statsRange==="month"?(Number(periodMatch?.[2])||defaultStatsMonth):1;
+  const statsQuarter=statsRange==="quarter"?Math.max(0,(Number(periodMatch?.[3])||defaultStatsQuarter)-1):0;
+  const statsStart=statsRange==="year"?`${statsYear}-01-01`:statsRange==="quarter"?`${statsYear}-${String(statsQuarter*3+1).padStart(2,"0")}-01`:`${statsYear}-${String(statsMonth).padStart(2,"0")}-01`;
+  const statsEnd=statsRange==="year"?`${statsYear}-12-31`:statsRange==="quarter"?addDate(localDate(new Date(statsYear,statsQuarter*3+3,1)),-1):addDate(localDate(new Date(statsYear,statsMonth,1)),-1);
+  const statsYears=[...new Set(saturdays.map(source=>source.date.slice(0,4)))].sort((a,b)=>b.localeCompare(a));
+  const statsPeriodControl=statsRange==="month"?`<input type="month" value="${statsPeriod}" onchange="setDoubleBridgeStatsPeriod(this.value)">`:statsRange==="quarter"?`<select onchange="setDoubleBridgeStatsPeriod(this.value)">${statsYears.flatMap(year=>[4,3,2,1].map(quarter=>`<option value="${year}-Q${quarter}" ${statsPeriod===`${year}-Q${quarter}`?'selected':''}>Quý ${quarter}/${year}</option>`)).join("")}</select>`:`<select onchange="setDoubleBridgeStatsPeriod(this.value)">${statsYears.map(year=>`<option value="${year}" ${statsPeriod===year?'selected':''}>Năm ${year}</option>`).join("")}</select>`;
+  const periodPlans=saturdays.filter(source=>source.date>=statsStart&&source.date<=statsEnd)
+    .map(source=>({source,plan:buildFixedDoublePlan(source,backtest,3,remainingStake,progression)}))
+    .filter(item=>item.plan.rows.some(row=>row.status!=="pending"&&row.status!=="stopped"));
+  const periodTotal=periodPlans.reduce((total,item)=>({cost:total.cost+item.plan.totalCost,reward:total.reward+item.plan.totalReward,net:total.net+item.plan.net}),{cost:0,reward:0,net:0});
+  const bestDay=[...backtest].filter(row=>row.samples).sort((a,b)=>(b.any/b.samples)-(a.any/a.samples)||b.samples-a.samples)[0];
+  const weekTracking=backtest.map((row,index)=>{
+    const date=addDate(saturday.date,index+1);
+    const result=stateCache.resultsByDate.get(date);
+    if(!result)return {...row,date,status:"pending",hitPairs:[]};
+    const drawn=new Set(lotoNumbers(result));
+    const hitPairs=pairs.filter(pair=>drawn.has(pair));
+    return {...row,date,status:hitPairs.length?"hit":"miss",hitPairs};
+  });
+  target.innerHTML=`<div class="long-term-bridge-result">
+    <div class="bridge-source">
+      <span>Nguồn cầu</span>
+      <strong>Thứ Bảy ${displayDate(saturday.date)}</strong>
+      <small>Giải 7 · cặp thứ 3: ${esc(rawPrize)}</small>
+    </div>
+    <div class="bridge-arrow">→</div>
+    <div class="bridge-pick">
+      <span>Hai cặp kép cả tuần</span>
+      <strong>${pairs.join(" · ")}</strong>
+      <small>${displayDate(weekStart)} – ${displayDate(weekEnd)}</small>
+    </div>
+    <button class="secondary" type="button" data-text="${pairs.join("-")}" onclick="copyReferenceText(this.dataset.text)">Copy ${pairs.join("-")}</button>
+  </div>
+  <div class="bridge-backtest-head hidden-bridge-extra"><strong>Theo dõi tuần ${displayDate(weekStart)} – ${displayDate(weekEnd)}</strong></div>
+  <div class="table-wrap bridge-week-tracking"><table>
+    <thead><tr><th>Ngày</th><th>Thời gian</th><th>Kết quả hai cặp kép ${pairs.join(" - ")}</th></tr></thead>
+    <tbody>${weekTracking.map(row=>`<tr class="${row.status==='hit'?'double-hit-row':''}">
+      <td><strong>${row.day}</strong></td><td>${displayDate(row.date)}</td>
+      <td>${row.status==="pending"?'<span class="pending">Chờ KQ</span>':row.status==="hit"?`<strong class="double-hit-label">ĐÃ VỀ ${row.hitPairs.join(" - ")}</strong>`:'<span class="muted">Chưa về</span>'}</td>
+    </tr>`).join("")}</tbody>
+  </table></div>
+  <div class="bridge-fixed-heading">
+    <div><strong>${saturday.date===latestSaturday.date?"Tuần mới nhất":"Tuần kiểm tra"}: mỗi cặp 3 điểm</strong><span>${fixedPlan.pairs.join(" - ")} · ${displayDate(fixedStart)} – ${displayDate(fixedEnd)}</span></div>
+    <div class="bridge-strategy-row">
+      <strong>Sau khi cặp đầu về</strong>
+      <div class="bridge-strategy-controls">
+        <label><span>Đánh cặp còn lại</span>
+          <span class="bridge-points-input"><input type="number" min="0" step="1" value="${remainingStake}" onchange="setDoubleBridgeAfterHitMode(this.value)"><b>điểm gốc</b></span>
+        </label>
+        <label><span>Cách đi điểm</span>
+          <select onchange="setDoubleBridgeProgression(this.value)">
+            <option value="double" ${progression==="double"?'selected':''}>Gấp thếp ×2</option>
+            <option value="increase" ${progression==="increase"?'selected':''}>Tăng đều +${remainingStake}đ</option>
+            <option value="fixed" ${progression==="fixed"?'selected':''}>Giữ nguyên</option>
+          </select>
+        </label>
+        <small>${remainingStake?`Điểm cặp còn lại sẽ ${progression==="double"?`đi ${remainingStake} → ${remainingStake*2} → ${remainingStake*4}…`:progression==="increase"?`đi ${remainingStake} → ${remainingStake*2} → ${remainingStake*3}…`:`giữ ${remainingStake} mỗi ngày`}.`:"Nhập 0 để dừng ngay khi cặp đầu tiên về."}</small>
+      </div>
+    </div>
+  </div>
+  <div class="table-wrap bridge-fixed-plan"><table>
+    <thead><tr><th>Ngày</th><th>Điểm đánh</th><th>Điểm trừ</th><th>Kết quả</th><th>Điểm cộng</th><th>Chênh lệch ngày</th></tr></thead>
+    <tbody>
+    <tr class="fixed-summary-row"><th colspan="2">Tổng kết đến hiện tại</th><th class="negative">-${fixedPlan.totalCost}</th><th>${fixedPlan.completedPairs.length===fixedPlan.pairs.length?'<span class="double-hit-label">ĐỦ 2 CẶP · ĐÃ DỪNG</span>':fixedPlan.stopped?'<span class="muted">ĐÃ DỪNG SAU CẶP ĐẦU</span>':`Đã về ${fixedPlan.completedPairs.length}/${fixedPlan.pairs.length} cặp`}</th><th class="positive">+${fixedPlan.totalReward}</th><th class="${fixedPlan.net>=0?'positive':'negative'}">${fixedPlan.net>=0?'+':''}${fixedPlan.net}</th></tr>
+    ${fixedPlan.rows.map(row=>`<tr class="${row.status==='hit'?'double-hit-row':''}">
+      <td><strong>${row.day}</strong><small>${displayDate(row.date)}</small></td>
+      <td>${row.status==="stopped"?"-":`${row.activePairs.join(" - ")} · ${row.stakeUsed}đ/cặp`}</td>
+      <td>${row.cost?`<span class="negative">-${row.cost}</span>`:"-"}</td>
+      <td>${row.status==="hit"?`<strong class="double-hit-label">VỀ ${row.hitPairs.join(" - ")}</strong>${row.completedCount<fixedPlan.pairs.length?`<small>${remainingStake?`Tiếp tục cặp còn lại ${remainingStake} điểm/ngày`:"Đã chọn dừng"}</small>`:''}`:row.status==="miss"?"Chưa về":row.status==="stopped"?'<span class="muted">Đã dừng</span>':'<span class="pending">Chờ KQ</span>'}</td>
+      <td>${row.reward?`<span class="positive">+${row.reward}</span>`:"-"}</td>
+      <td>${row.status==="miss"||row.status==="hit"?`<strong class="${row.net>=0?'positive':'negative'}">${row.net>=0?'+':''}${row.net}</strong>`:"-"}</td>
+    </tr>`).join("")}</tbody>
+  </table></div>
+  <div class="bridge-period-heading">
+    <strong>Thống kê điểm theo kỳ</strong>
+    <div class="bridge-period-controls"><label>Hiển thị
+        <select onchange="setDoubleBridgeStatsRange(this.value)">
+          <option value="month" ${statsRange==="month"?'selected':''}>Theo tháng</option>
+          <option value="quarter" ${statsRange==="quarter"?'selected':''}>Theo quý</option>
+          <option value="year" ${statsRange==="year"?'selected':''}>Theo năm</option>
+        </select>
+      </label>
+      <label>Chọn kỳ${statsPeriodControl}</label>
+    </div>
+  </div>
+  <div class="table-wrap bridge-period-stats"><table>
+    <thead><tr><th>Kỳ thống kê</th><th>Số tuần</th><th>Điểm trừ</th><th>Điểm cộng</th><th>Chênh lệch</th></tr></thead>
+    <tbody><tr class="period-total-row">
+      <td><strong>${displayDate(statsStart)} – ${displayDate(statsEnd)}</strong></td><td>${periodPlans.length}</td>
+      <td class="negative">-${periodTotal.cost}</td><td class="positive">+${periodTotal.reward}</td>
+      <td><strong class="${periodTotal.net>=0?'positive':'negative'}">${periodTotal.net>=0?'+':''}${periodTotal.net}</strong></td>
+    </tr>
+    ${periodPlans.map(item=>`<tr>
+      <td><strong>Tuần ${displayDate(addDate(item.source.date,1))}</strong><small>${item.plan.pairs.join(" - ")}</small></td><td>1</td>
+      <td class="negative">-${item.plan.totalCost}</td><td class="positive">+${item.plan.totalReward}</td>
+      <td><strong class="${item.plan.net>=0?'positive':'negative'}">${item.plan.net>=0?'+':''}${item.plan.net}</strong></td>
+    </tr>`).join("")}</tbody>
+  </table></div>
+  <div class="bridge-backtest-head hidden-bridge-extra">
+    <strong>Backtest chiến thuật 3 điểm trên các tuần quá khứ</strong>
+    <span>Sau cặp đầu: ${remainingStake?`${remainingStake} điểm gốc · ${progression==="double"?"gấp thếp ×2":progression==="increase"?"tăng đều":"giữ nguyên"}`:"dừng luôn"}</span>
+  </div>
+  ${historicalFixedPlans.length?`<div class="bridge-history-summary">
+    <div><span>Số tuần đủ dữ liệu</span><strong>${historicalFixedPlans.length}</strong></div>
+    <div><span>Tuần dương</span><strong class="positive">${historicalTotals.positive} · ${percent(historicalTotals.positive,historicalFixedPlans.length)}</strong></div>
+    <div><span>Tuần âm</span><strong class="negative">${historicalTotals.negative} · ${percent(historicalTotals.negative,historicalFixedPlans.length)}</strong></div>
+    <div><span>Về ít nhất 1 cặp</span><strong>${historicalTotals.first} · ${percent(historicalTotals.first,historicalFixedPlans.length)}</strong></div>
+    <div><span>Về đủ 2 cặp</span><strong>${historicalTotals.both} · ${percent(historicalTotals.both,historicalFixedPlans.length)}</strong></div>
+    <div><span>Tổng chênh lệch</span><strong class="${historicalTotals.net>=0?'positive':'negative'}">${historicalTotals.net>=0?'+':''}${historicalTotals.net}</strong></div>
+    <div><span>ROI</span><strong class="${historicalTotals.net>=0?'positive':'negative'}">${historicalTotals.cost?`${historicalTotals.net>=0?'+':''}${Math.round(historicalTotals.net/historicalTotals.cost*100)}%`:"-"}</strong></div>
+  </div>
+  <div class="table-wrap bridge-history-plan"><table>
+    <thead><tr><th>Tuần áp dụng</th><th>Hai cặp kép</th><th>Đã về</th><th>Điểm trừ</th><th>Điểm cộng</th><th>Chênh lệch</th></tr></thead>
+    <tbody>${historicalFixedPlans.map(item=>`<tr class="${item.plan.net>=0?'history-positive':'history-negative'}">
+      <td><strong>${displayDate(item.start)} – ${displayDate(item.end)}</strong><small>Chốt từ ${displayDate(item.source.date)}</small></td>
+      <td>${item.plan.pairs.join(" - ")}</td>
+      <td>${item.plan.completedPairs.length}/${item.plan.pairs.length}${item.plan.completedPairs.length?` · ${item.plan.completedPairs.join(" - ")}`:""}</td>
+      <td class="negative">-${item.plan.totalCost}</td><td class="positive">+${item.plan.totalReward}</td>
+      <td><strong class="${item.plan.net>=0?'positive':'negative'}">${item.plan.net>=0?'+':''}${item.plan.net}</strong></td>
+    </tr>`).join("")}</tbody>
+  </table></div>`:'<p class="muted hidden-bridge-extra">Chưa có tuần quá khứ nào đủ cả 8 ngày kết quả để backtest.</p>'}
+  <div class="bridge-backtest-head hidden-bridge-extra">
+    <strong>Phân bổ điểm dự đoán không âm khi 1 cặp về</strong>
+    <span>Hai cặp đánh cùng điểm · dừng ngay sau khi đã về</span>
+  </div>
+  <div class="table-wrap bridge-allocation"><table>
+    <thead><tr><th>Ngày</th><th>Tỷ lệ quá khứ</th><th>Điểm mỗi cặp</th><th>Điểm trừ ngày</th><th>Tổng điểm trừ</th><th>Nếu 1 cặp về</th><th>Chênh lệch lũy kế</th></tr></thead>
+    <tbody>${breakEvenPlan.map(row=>`<tr>
+      <td><strong>${row.day}</strong></td>
+      <td>${percent(row.any,row.samples)} <small>(${row.any}/${row.samples})</small></td>
+      <td><strong>${row.stake}đ / cặp</strong></td>
+      <td class="negative">-${row.dayCost}</td><td>-${row.cumulativeCost}</td>
+      <td class="positive">+${row.oneHitReward}</td>
+      <td><strong class="${row.oneHitNet>=0?'positive':'negative'}">${row.oneHitNet>=0?'+':''}${row.oneHitNet}</strong></td>
+    </tr>`).join("")}</tbody>
+  </table></div>
+  <p class="bridge-risk-note"><strong>Lưu ý:</strong> Bảng chỉ cân điểm để không âm nếu ít nhất một cặp kép xuất hiện và dừng đúng lúc. Điểm tăng rất nhanh qua từng ngày; không có quy luật nào bảo đảm kết quả sẽ về.</p>
+  <div class="bridge-backtest-head hidden-bridge-extra">
+    <strong>So sánh dữ liệu các tuần quá khứ</strong>
+    ${bestDay?`<span>Ngày có tỷ lệ về ít nhất 1 cặp cao nhất: <b>${bestDay.day} · ${percent(bestDay.any,bestDay.samples)}</b></span>`:""}
+  </div>
+  <div class="table-wrap bridge-backtest"><table>
+    <thead><tr><th>Ngày trong tuần</th><th>Số tuần có dữ liệu</th><th>Về ít nhất 1 cặp</th><th>Về cả 2 cặp</th><th>Cặp kép từ số đầu</th><th>Cặp kép từ số sau</th></tr></thead>
+    <tbody>${backtest.map(row=>`<tr class="${bestDay===row?'best-double-day':''}">
+      <td><strong>${row.day}</strong></td><td>${row.samples}</td>
+      <td><b>${percent(row.any,row.samples)}</b> <small>(${row.any}/${row.samples})</small></td>
+      <td>${percent(row.both,row.samples)} <small>(${row.both}/${row.samples})</small></td>
+      <td>${percent(row.first,row.samples)} <small>(${row.first}/${row.samples})</small></td>
+      <td>${percent(row.second,row.samples)} <small>(${row.second}/${row.samples})</small></td>
+    </tr>`).join("")}</tbody>
+  </table></div>`;
 }
 
 function renderEntries(){
@@ -3058,6 +3370,7 @@ function render(){
   const activeSubtab=$(".subtab.active")?.dataset.subtab||"results";
   if(activeTab==="predict"){
     renderMembers();
+    renderLongTermDoubleBridge();
     renderEntries();
   }else if(activeTab==="stats"){
     if(activeSubtab==="results"){
