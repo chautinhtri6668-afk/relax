@@ -663,10 +663,54 @@ function parseQuickEntryLine(line){
   const type=suffix==="k"?"de":suffix==="đ"||suffix==="d"||suffix==="điểm"||suffix==="diem"?"lo":$("#entryType").value;
   return {type,numbers,points,groupLabel:""};
 }
+function uniqueNumbers(numbers){
+  return numbers.filter((number,index,all)=>all.indexOf(number)===index);
+}
+function numbersFromTails(tails){
+  return tails.flatMap(tail=>Array.from({length:10},(_,head)=>`${head}${tail}`));
+}
+function parseManualNumberInput(text){
+  const source=String(text||"");
+  const normalized=source.toLowerCase();
+  const groups=[];
+  const numbers=[];
+  const keywordPattern=/(đầu|dau|đít|dit|đuôi|duoi)\s*([\s\S]*?)(?=(?:đầu|dau|đít|dit|đuôi|duoi)|$)/gi;
+  let matchedCommand=false;
+  for(const match of normalized.matchAll(keywordPattern)){
+    const keyword=match[1];
+    const digits=uniqueNumbers(match[2].match(/\d/g)||[]);
+    if(!digits.length)continue;
+    matchedCommand=true;
+    const isHead=keyword==="đầu"||keyword==="dau";
+    const expanded=isHead
+      ?digits.flatMap(head=>Array.from({length:10},(_,tail)=>`${head}${tail}`))
+      :numbersFromTails(digits);
+    numbers.push(...expanded);
+    groups.push({
+      type:isHead?"Đầu":"Đít",
+      digits,
+      numbers:expanded
+    });
+  }
+  if(!matchedCommand){
+    numbers.push(...[...source.matchAll(/\d{1,2}/g)].map(match=>two(match[0])));
+  }
+  return {numbers:uniqueNumbers(numbers),groups};
+}
 function parseManualNumbers(text){
-  return [...String(text||"").matchAll(/\d{1,2}/g)]
-    .map(match=>two(match[0]))
-    .filter((number,index,all)=>all.indexOf(number)===index);
+  return parseManualNumberInput(text).numbers;
+}
+function renderManualInputSummary(parsed){
+  if(!parsed.groups.length)return "";
+  const groupHtml=parsed.groups.map(group=>`
+    <div class="manual-input-group">
+      <strong>${group.type} ${group.digits.join(" - ")}</strong>
+      <span>${group.numbers.join(" ")}</span>
+    </div>`).join("");
+  return `<div class="manual-input-summary">
+    <div><b>Đã bung ${parsed.numbers.length} số:</b> ${parsed.numbers.join(" - ")}</div>
+    ${groupHtml}
+  </div>`;
 }
 function manualNumberCandidates(numbers,autoRows,type){
   return numbers.map((number,index)=>{
@@ -681,10 +725,15 @@ function manualNumberCandidates(numbers,autoRows,type){
     return {number,index,type,score,count,bestRate,bestRule};
   }).sort((a,b)=>b.score-a.score||b.bestRate-a.bestRate||b.count-a.count||a.index-b.index);
 }
+function latestManualAnalysisResult(){
+  return stateCache.resultsDesc.find(result=>result?.special&&(result.prizes||[]).length)||null;
+}
 function buildManualNumberAnalysis(numbers){
-  const baseResult=stateCache.resultsDesc[0];
+  const baseResult=latestManualAnalysisResult();
   if(!baseResult)return {numbers,baseResult:null,autoRows:[],lo:[],de:[],loCandidates:[],deCandidates:[],allocation:null};
-  const autoRows=buildAutoRowsForBase(baseResult,stateCache.results,stateCache.resultsByDate);
+  const results=stateCache.results.filter(result=>result?.special&&(result.prizes||[]).length);
+  const byDate=new Map(results.map(result=>[result.date,result]));
+  const autoRows=buildAutoRowsForBase(baseResult,results,byDate);
   const mode=$("#referenceMode")?.value||"fun";
   const strong=mode==="strong";
   const loCandidates=manualNumberCandidates(numbers,autoRows,"lo");
@@ -705,7 +754,7 @@ function buildManualNumberAnalysis(numbers){
     forecastDate:addDate(baseResult.date,1)
   };
   allocation.signal=referenceSignal(allocation);
-  const nextResult=stateCache.resultsByDate.get(allocation.forecastDate);
+  const nextResult=byDate.get(allocation.forecastDate);
   allocation.performance=nextResult?evaluateReferencePerformance(allocation,nextResult):null;
   return {numbers,baseResult,autoRows,lo, de,loCandidates,deCandidates,allocation};
 }
@@ -728,9 +777,10 @@ function renderManualAnalysisRows(candidates,picks,type){
 function renderManualNumberAnalysis(){
   const target=$("#analyzeNumbersResult");
   if(!target)return;
-  const numbers=parseManualNumbers($("#analyzeNumbersText").value);
+  const parsed=parseManualNumberInput($("#analyzeNumbersText").value);
+  const numbers=parsed.numbers;
   if(!numbers.length){
-    target.innerHTML='<p class="muted">Nhập vài số cần soi, ví dụ: 05 13 67 76-31-50.</p>';
+    target.innerHTML='<p class="muted">Nhập vài số cần soi, ví dụ: đầu 1 - 3, đít 5 - 7 hoặc 05 13 67 76-31-50.</p>';
     return;
   }
   const analysis=buildManualNumberAnalysis(numbers);
@@ -743,6 +793,7 @@ function renderManualNumberAnalysis(){
   target.innerHTML=`<div class="manual-analysis-card">
     <div class="manual-analysis-head">
       <div><strong>Soi từ kết quả mới nhất ${displayDate(baseResult.date)}</strong>
+        <small>ĐB ${esc(baseResult.special)} · ${(baseResult.prizes||[]).length} số kết quả</small>
         <div class="allocation-mode-switch">
           <button type="button" data-manual-mode="fun" class="${allocation.mode.includes('Đánh vui')?'active':''}">Đánh vui</button>
           <button type="button" data-manual-mode="strong" class="${allocation.mode.includes('Kết mạnh')?'active':''}">Kết mạnh</button>
@@ -752,6 +803,7 @@ function renderManualNumberAnalysis(){
         <button class="secondary" type="button" data-copy-all data-text="${esc(combinedText)}" onclick="copyReferenceText(this.dataset.text)">Copy cả lô + đề</button>
       </div>
     </div>
+    ${renderManualInputSummary(parsed)}
     ${renderReferenceSignal(allocation.signal)}
     ${renderReferencePerformance(allocation.performance)}
     ${renderReferencePool(allocation.pool)}
@@ -781,6 +833,12 @@ function renderManualNumberAnalysis(){
     </div>
     <p class="manual-analysis-note">Số “bỏ” là số chưa khớp rule đủ tốt trong kho dữ liệu, nên giảm điểm hoặc loại để đỡ âm.</p>
   </div>`;
+}
+function refreshManualAnalysisIfOpen(){
+  const input=$("#analyzeNumbersText");
+  const target=$("#analyzeNumbersResult");
+  if(!input?.value.trim()||!target?.innerHTML.trim())return;
+  renderManualNumberAnalysis();
 }
 function memberName(id){return state.members.find(x=>x.id===id)?.name||"Đã xóa"}
 function resultForDate(date){return stateCache.resultsByDate.get(date)}
@@ -3372,6 +3430,7 @@ function render(){
     renderMembers();
     renderLongTermDoubleBridge();
     renderEntries();
+    refreshManualAnalysisIfOpen();
   }else if(activeTab==="stats"){
     if(activeSubtab==="results"){
       renderResultPreview();
