@@ -14,6 +14,10 @@
     <nav class="tabs header-tabs" aria-label="Chức năng chính">
       <button class="tab active" type="button" data-tab="predict">Dự đoán</button>
       <button class="tab" type="button" data-tab="stats">Thống kê</button>
+      <button class="tab" type="button" data-tab="dbbridge">Cầu Đặc biệt</button>
+      <button class="tab" type="button" data-tab="doublebridge">Cầu lô kép</button>
+      <button class="tab" type="button" data-tab="forecast">Máy dự đoán</button>
+      <button class="tab admin-only" type="button" data-tab="patterns">Cầu tổng hợp</button>
       <button class="tab" type="button" data-tab="report">Báo cáo</button>
     </nav>
   </div>
@@ -37,30 +41,29 @@
   </section>
 
   <section id="tab-predict" class="tab-panel active">
-    <div class="grid two">
-      <article class="card">
-        <h2>Ghi số</h2>
-        <form id="entryForm" class="entry-form">
+    <div class="predict-workspace">
+      <article class="card quick-entry-card">
+        <h2>Nhập nhanh</h2>
+        <div class="quick-entry-controls">
           <label>Ngày<input id="entryDate" type="date" required></label>
           <label>Thành viên<select id="entryMember" required></select></label>
-          <label>Loại
+          <label>Loại mặc định
             <select id="entryType">
               <option value="lo">Lô</option>
               <option value="de">Đề</option>
             </select>
           </label>
-          <label>Số chọn<input id="entryNumber" inputmode="numeric" maxlength="2" placeholder="00-99" required></label>
-          <label>Điểm ghi<input id="entryPoints" type="number" min="1" value="1" required></label>
-          <button>Thêm</button>
-        </form>
+        </div>
         <div class="quick-entry">
-          <label>Nhập nhanh
+          <label>Dãy số và điểm
             <textarea id="quickEntryText" rows="4" placeholder="62-13 3đ&#10;76-97-50 30k&#10;Đầu 4, 20k&#10;Đầu 2 -7 10k"></textarea>
           </label>
           <div class="inline">
-            <button id="quickEntryBtn" type="button" class="secondary">Nhập nhanh</button>
+            <button id="quickCalcBtn" type="button" class="secondary">Tính tổng</button>
             <span id="quickEntryStatus" class="muted"></span>
           </div>
+          <div id="quickEntryPreview" class="quick-entry-preview"></div>
+          <div id="quickEntrySaved" class="quick-entry-saved"></div>
         </div>
       </article>
 
@@ -77,48 +80,12 @@
       </article>
     </div>
 
-    <section class="card long-term-bridge-card">
-      <div class="section-head">
-        <div>
-          <h2>Cầu lô kép trường kỳ</h2>
-          <span class="muted">Lấy hai chữ số của cặp thứ 3 Giải 7 ngày thứ Bảy để tạo hai cặp kép, theo từ Chủ nhật tuần này đến Chủ nhật tuần sau.</span>
-        </div>
-        <label>Chọn tuần kiểm tra
-          <select id="doubleBridgeWeekSelect"></select>
-        </label>
-      </div>
-      <div id="longTermDoubleBridge"></div>
-    </section>
-
-    <section class="card">
-      <div class="section-head">
-        <h2>Sổ dự đoán</h2>
-        <div class="inline">
-          <input id="filterDate" type="date">
-          <button id="clearFilter" class="secondary" type="button">Tất cả</button>
-        </div>
-      </div>
-      <div class="table-wrap">
-        <table>
-          <thead>
-          <tr>
-            <th>Ngày</th><th>Tổng số đánh</th><th>Tổng điểm dự đoán</th>
-            <th>Số lô đúng</th><th>Số đề đúng</th><th>Điểm trừ</th>
-            <th>Điểm cộng</th><th>Chênh lệch</th><th>Xóa</th>
-          </tr>
-          </thead>
-          <tbody id="summaryBody"></tbody>
-        </table>
-      </div>
-    </section>
   </section>
 
   <section id="tab-stats" class="tab-panel">
     <nav class="subtabs" aria-label="Thống kê kết quả">
       <button class="subtab active" type="button" data-subtab="results">Kết quả</button>
       <button class="subtab" type="button" data-subtab="special">Đặc biệt</button>
-      <button class="subtab" type="button" data-subtab="forecast">Dự đoán</button>
-      <button class="subtab admin-only" type="button" data-subtab="patterns">Quy luật</button>
       <button class="subtab" type="button" data-subtab="input">Nhập KQ</button>
     </nav>
 
@@ -168,54 +135,6 @@
       </section>
     </section>
 
-    <section id="stats-forecast" class="subtab-panel">
-      <section class="card">
-        <div class="section-head">
-          <h2>Dự đoán</h2>
-          <label>Năm
-            <select id="patternYear"></select>
-          </label>
-          <label>Ngày so sánh
-            <input id="patternBaseDate" type="date">
-          </label>
-          <label>Cách đánh
-            <select id="referenceMode">
-              <option value="fun">Đánh vui</option>
-              <option value="strong">Kết mạnh</option>
-            </select>
-          </label>
-          <label>Tháng test
-            <input id="referenceBacktestMonth" type="month">
-          </label>
-        </div>
-        <div id="forecastStats"></div>
-      </section>
-    </section>
-
-    <section id="stats-patterns" class="subtab-panel admin-only">
-      <section class="card">
-        <div class="section-head">
-          <h2>Quy luật</h2>
-          <label>Năm
-            <select id="lawYear"></select>
-          </label>
-          <label>Ngày so sánh
-            <input id="lawBaseDate" type="date">
-          </label>
-          <label>Cách đánh
-            <select id="lawReferenceMode">
-              <option value="fun">Đánh vui</option>
-              <option value="strong">Kết mạnh</option>
-            </select>
-          </label>
-          <label>Tháng test
-            <input id="lawBacktestMonth" type="month">
-          </label>
-        </div>
-        <div id="patternStats"></div>
-      </section>
-    </section>
-
     <section id="stats-input" class="subtab-panel">
       <article class="card">
         <h2>Nhập kết quả</h2>
@@ -237,7 +156,104 @@
     </section>
   </section>
 
+  <section id="tab-dbbridge" class="tab-panel">
+      <section class="card">
+        <div class="section-head">
+          <h2>Cầu Đặc biệt</h2>
+          <label>Ngày soi
+            <input id="dbBridgeBaseDate" type="date">
+          </label>
+        </div>
+        <div id="dbBridgeStats"></div>
+      </section>
+    </section>
+
+  <section id="tab-doublebridge" class="tab-panel">
+      <section class="card long-term-bridge-card stats-double-bridge-card">
+        <div class="section-head">
+          <div>
+            <h2>Cầu lô kép trường kỳ</h2>
+            <span class="muted">Thống kê cầu kép lấy từ cặp thứ 3 Giải 7 ngày thứ Bảy, soi từ Chủ nhật tuần này đến Chủ nhật tuần sau.</span>
+          </div>
+          <label>Chọn tuần kiểm tra
+            <select id="doubleBridgeStatsWeekSelect"></select>
+          </label>
+        </div>
+        <div id="statsLongTermDoubleBridge"></div>
+      </section>
+    </section>
+
+  <section id="tab-forecast" class="tab-panel">
+      <section class="card">
+        <div class="section-head">
+          <h2>Máy dự đoán</h2>
+          <label>Năm
+            <select id="patternYear"></select>
+          </label>
+          <label>Ngày so sánh
+            <input id="patternBaseDate" type="date">
+          </label>
+          <label>Cách đánh
+            <select id="referenceMode">
+              <option value="fun">Đánh vui</option>
+              <option value="strong">Kết mạnh</option>
+            </select>
+          </label>
+          <label>Tháng test
+            <input id="referenceBacktestMonth" type="month">
+          </label>
+        </div>
+        <div id="forecastStats"></div>
+      </section>
+    </section>
+
+  <section id="tab-patterns" class="tab-panel admin-only">
+      <section class="card">
+        <div class="section-head">
+          <h2>Cầu tổng hợp</h2>
+          <label>Năm
+            <select id="lawYear"></select>
+          </label>
+          <label>Ngày so sánh
+            <input id="lawBaseDate" type="date">
+          </label>
+          <label>Cách đánh
+            <select id="lawReferenceMode">
+              <option value="fun">Đánh vui</option>
+              <option value="strong">Kết mạnh</option>
+            </select>
+          </label>
+          <label>Tháng test
+            <input id="lawBacktestMonth" type="month">
+          </label>
+        </div>
+        <div id="patternStats"></div>
+      </section>
+    </section>
+
   <section id="tab-report" class="tab-panel">
+    <section class="card">
+      <div class="section-head">
+        <h2>Sổ dự đoán</h2>
+        <div class="inline">
+          <input id="filterDate" type="date">
+          <button id="clearFilter" class="secondary" type="button">Tất cả</button>
+        </div>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead>
+          <tr>
+            <th>Ngày</th><th>Tổng số đánh</th><th>Tổng điểm dự đoán</th>
+            <th>Số lô đúng</th><th>Số đề đúng</th><th>Điểm trừ</th>
+            <th>Điểm cộng</th><th>Chênh lệch</th><th>Xóa</th>
+          </tr>
+          </thead>
+          <tbody id="summaryBody"></tbody>
+        </table>
+      </div>
+    </section>
+
     <section class="card">
       <div class="section-head">
         <h2>Báo cáo</h2>

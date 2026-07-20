@@ -32,7 +32,8 @@ let isAdmin=sessionStorage.getItem("so-diem-vui-admin")==="1";
 let currentPlayerId=sessionStorage.getItem("so-diem-vui-player")||"";
 const patternBaseState={
   forecast:{manual:false,latest:""},
-  law:{manual:false,latest:""}
+  law:{manual:false,latest:""},
+  dbbridge:{manual:false,latest:""}
 };
 const ADMIN_HASH="e6121f114d1b02a340a2f495504c92feb62a13590a161c25f282d1845aa600ad";
 
@@ -581,12 +582,12 @@ function renderAdminState(){
   renderPlayerSession();
 }
 function enforceAdminOnlySubtabs(){
-  if(!isAdmin&&$(".subtab.active")?.dataset.subtab==="patterns"){
-    const fallback=$('.subtab[data-subtab="results"]');
+  if(!isAdmin&&$(".tab.active")?.dataset.tab==="patterns"){
+    const fallback=$('.tab[data-tab="stats"]');
     fallback?.classList.add("active");
-    $('.subtab[data-subtab="patterns"]')?.classList.remove("active");
-    $("#stats-patterns")?.classList.remove("active");
-    $("#stats-results")?.classList.add("active");
+    $('.tab[data-tab="patterns"]')?.classList.remove("active");
+    $("#tab-patterns")?.classList.remove("active");
+    $("#tab-stats")?.classList.add("active");
   }
 }
 function renderPlayerSession(){
@@ -644,24 +645,255 @@ function parseQuickEntryLine(line){
   const text=String(line).trim().toLowerCase();
   if(!text)return null;
   const pointMatch=text.match(/(\d+(?:[.,]\d+)?)\s*(k|đ|d|điểm|diem)?\s*$/i);
-  if(!pointMatch)return null;
-  const rawPoints=pointMatch[1].replace(",",".");
-  const points=Number(rawPoints);
-  if(!Number.isFinite(points)||points<=0)return null;
-  const suffix=pointMatch[2]||"";
-  const numberPart=text.slice(0,pointMatch.index);
+  const looksLikeOpenHeadCommand=pointMatch&&!pointMatch[2]&&/(đầu|dau|đít|dit|đuôi|duoi)\s*$/i.test(text.slice(0,pointMatch.index).trim());
+  const rawPoints=!looksLikeOpenHeadCommand&&pointMatch?.[1]?pointMatch[1].replace(",","."):"";
+  let points=Number(rawPoints);
+  const suffix=!looksLikeOpenHeadCommand&&pointMatch?.[2]?pointMatch[2]:"";
+  const numberPart=pointMatch&&!looksLikeOpenHeadCommand?text.slice(0,pointMatch.index):text;
   if(numberPart.includes("đầu")||numberPart.includes("dau")){
     const heads=(numberPart.match(/\d/g)||[]).filter((n,i,a)=>a.indexOf(n)===i);
     if(!heads.length)return null;
     const numbers=heads.flatMap(head=>Array.from({length:10},(_,tail)=>`${head}${tail}`));
     const type=suffix==="k"?"de":"de";
+    if(!Number.isFinite(points)||points<=0)points=10;
     const groupLabel=heads.map(head=>`${head}0 -> ${head}9`).join(", ");
+    return {type,numbers,points,groupLabel};
+  }
+  if(numberPart.includes("đít")||numberPart.includes("dit")||numberPart.includes("đuôi")||numberPart.includes("duoi")){
+    const tails=(numberPart.match(/\d/g)||[]).filter((n,i,a)=>a.indexOf(n)===i);
+    if(!tails.length)return null;
+    const numbers=numbersFromTails(tails);
+    const type=suffix==="k"?"de":"de";
+    if(!Number.isFinite(points)||points<=0)points=10;
+    const groupLabel=tails.map(tail=>`0${tail} -> 9${tail}`).join(", ");
     return {type,numbers,points,groupLabel};
   }
   const numbers=(numberPart.match(/\d{1,2}/g)||[]).map(two).filter((n,i,a)=>a.indexOf(n)===i);
   if(!numbers.length)return null;
   const type=suffix==="k"?"de":suffix==="đ"||suffix==="d"||suffix==="điểm"||suffix==="diem"?"lo":$("#entryType").value;
+  if(!Number.isFinite(points)||points<=0)points=type==="de"?10:1;
   return {type,numbers,points,groupLabel:""};
+}
+function quickEntryCost(type,numbers,points){
+  const count=(numbers||[]).length;
+  return type==="lo"?count*points*23:count*points;
+}
+function quickEntryCopyLinesFromRows(rows){
+  return ["lo","de"].map(type=>{
+    const typeRows=rows.filter(row=>row.dataset.type===type);
+    if(!typeRows.length)return "";
+    const title=type==="lo"?"Lô":"Đề";
+    const suffix=type==="lo"?"đ":"k";
+    return `${title}: `+typeRows.map(row=>{
+      const numbers=String(row.dataset.numbers||"").split("-").filter(Boolean).join(" - ");
+      const points=Math.max(0,Number(row.querySelector("[data-quick-points-input]")?.value)||0);
+      return `${numbers} ${points}${suffix}`;
+    }).join("; ");
+  }).filter(Boolean);
+}
+function updateQuickEntryCopyPreview(){
+  const target=document.querySelector("#quickEntryPreview [data-quick-copy-preview]");
+  if(!target)return;
+  const rows=[...document.querySelectorAll("#quickEntryPreview [data-quick-row]")];
+  const total=document.querySelector("#quickEntryPreview [data-quick-cost]")?.textContent||"0";
+  const lines=quickEntryCopyLinesFromRows(rows);
+  target.innerHTML=lines.length?`${lines.map(line=>`<span>${esc(line)}</span>`).join("")}<strong>Tổng tiền trừ: ${esc(total)}k</strong>`:"";
+}
+function buildQuickEntryDraft(){
+  const lines=$("#quickEntryText").value.split(/\r?\n|;/).map(x=>x.trim()).filter(Boolean);
+  const rows=[],failed=[];
+  lines.forEach(line=>{
+    const parsed=parseQuickEntryLine(line);
+    if(!parsed){failed.push(line);return}
+    rows.push({...parsed,line});
+  });
+  return {rows,failed};
+}
+function renderQuickEntryPreview(){
+  const target=$("#quickEntryPreview");
+  if(!target)return {rows:[],failed:[]};
+  const draft=buildQuickEntryDraft();
+  if(!draft.rows.length){
+    target.innerHTML="";
+    $("#quickEntryStatus").textContent=draft.failed.length?`Chưa đọc được ${draft.failed.length} dòng.`:"Chưa có nội dung.";
+    return draft;
+  }
+  const totalTurns=draft.rows.reduce((sum,row)=>sum+row.numbers.length,0);
+  const totalPoints=draft.rows.reduce((sum,row)=>sum+row.numbers.length*row.points,0);
+  const totalCost=draft.rows.reduce((sum,row)=>sum+quickEntryCost(row.type,row.numbers,row.points),0);
+  const groupTotals={
+    lo:{turns:0,cost:0},
+    de:{turns:0,cost:0}
+  };
+  draft.rows.forEach(row=>{
+    if(!groupTotals[row.type])return;
+    groupTotals[row.type].turns+=row.numbers.length;
+    groupTotals[row.type].cost+=quickEntryCost(row.type,row.numbers,row.points);
+  });
+  const renderGroup=type=>{
+    const rows=draft.rows.filter(row=>row.type===type);
+    const title=type==="lo"?"Lô":"Đề";
+    const groupTurns=rows.reduce((sum,row)=>sum+row.numbers.length,0);
+    const groupCost=rows.reduce((sum,row)=>sum+quickEntryCost(row.type,row.numbers,row.points),0);
+    return `<div class="quick-draft-column ${type}">
+      <div class="quick-draft-title"><strong>${title}</strong><span data-quick-group="${type}">${groupTurns} lượt · trừ ${groupCost}</span></div>
+      ${rows.length?`<table class="quick-draft-table">
+        <thead><tr><th>Dự đoán</th><th>Điểm/số</th><th>Trừ tiền</th></tr></thead>
+        <tbody>${rows.map((row,index)=>`
+          <tr data-quick-row data-type="${row.type}" data-numbers="${esc(row.numbers.join("-"))}" data-group-label="${esc(row.groupLabel||"")}">
+            <td><strong>${row.numbers.join(" - ")} <span data-quick-row-points-label>${row.points}${row.type==="lo"?"đ":"k"}</span></strong><small>${esc(row.groupLabel||row.line)}</small></td>
+            <td><input type="number" min="0" step="${row.type==="de"?10:1}" value="${row.points}" data-quick-points-input aria-label="Điểm ${title} dòng ${index+1}"></td>
+            <td><span data-quick-row-cost>${quickEntryCost(row.type,row.numbers,row.points)}</span></td>
+          </tr>`).join("")}</tbody>
+      </table>`:`<p class="muted">Chưa có dòng ${title.toLowerCase()}.</p>`}
+    </div>`;
+  };
+  target.innerHTML=`<div class="quick-preview-layout">
+    <div class="quick-total-panel">
+      <div><span>Lượt</span><strong data-quick-turns>${totalTurns}</strong></div>
+      <div><span>Lô</span><strong data-quick-type-cost="lo">-${groupTotals.lo.cost}</strong></div>
+      <div><span>Đề</span><strong data-quick-type-cost="de">-${groupTotals.de.cost}</strong></div>
+      <div class="quick-total-money"><span>Tổng tiền trừ</span><strong><b data-quick-cost>${totalCost}</b>k</strong></div>
+    </div>
+    <div class="quick-draft-area">
+      <div class="quick-preview-actions">
+        <button id="quickCopyBtn" class="secondary" type="button">Copy</button>
+        <button id="quickEntryBtn" type="button">Ghi nhanh</button>
+      </div>
+      <div class="quick-copy-preview" data-quick-copy-preview></div>
+      <div class="quick-draft-columns">${renderGroup("lo")}${renderGroup("de")}</div>
+    </div>
+  </div>
+  ${draft.failed.length?`<p class="quick-failed">Chưa đọc được: ${draft.failed.map(esc).join("; ")}</p>`:""}`;
+  updateQuickEntryCopyPreview();
+  $("#quickEntryStatus").textContent=`Đã tính ${totalTurns} lượt, tổng điểm ${totalPoints}, tiền trừ ${totalCost}.`;
+  return draft;
+}
+function updateQuickEntryTotals(){
+  const rows=[...document.querySelectorAll("#quickEntryPreview [data-quick-row]")];
+  if(!rows.length)return;
+  let totalTurns=0,totalPoints=0,totalCost=0;
+  const groups={lo:{turns:0,cost:0},de:{turns:0,cost:0}};
+  rows.forEach(row=>{
+    const numbers=String(row.dataset.numbers||"").split("-").filter(Boolean);
+    const points=Math.max(0,Number(row.querySelector("[data-quick-points-input]")?.value)||0);
+    const cost=quickEntryCost(row.dataset.type,numbers,points);
+    totalTurns+=numbers.length;
+    totalPoints+=numbers.length*points;
+    totalCost+=cost;
+    if(groups[row.dataset.type]){
+      groups[row.dataset.type].turns+=numbers.length;
+      groups[row.dataset.type].cost+=cost;
+    }
+    const costNode=row.querySelector("[data-quick-row-cost]");
+    if(costNode)costNode.textContent=String(cost);
+    const pointsLabel=row.querySelector("[data-quick-row-points-label]");
+    if(pointsLabel)pointsLabel.textContent=`${points}${row.dataset.type==="lo"?"đ":"k"}`;
+  });
+  const turnsNode=document.querySelector("#quickEntryPreview [data-quick-turns]");
+  const pointsNode=document.querySelector("#quickEntryPreview [data-quick-points]");
+  const costNode=document.querySelector("#quickEntryPreview [data-quick-cost]");
+  if(turnsNode)turnsNode.textContent=String(totalTurns);
+  if(pointsNode)pointsNode.textContent=String(totalPoints);
+  if(costNode)costNode.textContent=String(totalCost);
+  Object.entries(groups).forEach(([type,group])=>{
+    const node=document.querySelector(`#quickEntryPreview [data-quick-group="${type}"]`);
+    if(node)node.textContent=`${group.turns} lượt · trừ ${group.cost}`;
+    const costSummary=document.querySelector(`#quickEntryPreview [data-quick-type-cost="${type}"]`);
+    if(costSummary)costSummary.textContent=`-${group.cost}`;
+  });
+  updateQuickEntryCopyPreview();
+  $("#quickEntryStatus").textContent=`Đã tính ${totalTurns} lượt, tổng điểm ${totalPoints}, tiền trừ ${totalCost}.`;
+}
+function copyQuickEntryPreview(){
+  const rows=[...document.querySelectorAll("#quickEntryPreview [data-quick-row]")];
+  if(!rows.length){
+    $("#quickEntryStatus").textContent="Chưa có bảng để copy.";
+    return;
+  }
+  const lines=quickEntryCopyLinesFromRows(rows);
+  const total=document.querySelector("#quickEntryPreview [data-quick-cost]")?.textContent||"0";
+  const text=[...lines,`Tổng tiền trừ: ${total}k`].join("\n");
+  if(navigator.clipboard?.writeText){
+    navigator.clipboard.writeText(text)
+      .then(()=>{$("#quickEntryStatus").textContent="Đã copy bảng ghi nhanh.";})
+      .catch(()=>prompt("Copy bảng ghi nhanh",text));
+  }else{
+    prompt("Copy bảng ghi nhanh",text);
+  }
+}
+function quickSavedBatches(entries){
+  const grouped=new Map();
+  entries.forEach((entry,index)=>{
+    const key=entry.batchCreatedAt&&entry.batchId?entry.batchId:`legacy-${entry.date}-${entry.memberId}`;
+    if(!grouped.has(key))grouped.set(key,{key,createdAt:entry.batchCreatedAt||0,firstIndex:index,entries:[]});
+    grouped.get(key).entries.push(entry);
+  });
+  return [...grouped.values()].sort((a,b)=>(a.createdAt||a.firstIndex)-(b.createdAt||b.firstIndex));
+}
+function quickSavedBatchSummary(entries){
+  let totalPoints=0,loHits=0,deHits=0,cost=0,reward=0,pending=0;
+  entries.forEach(entry=>{
+    const c=calc(entry);
+    totalPoints+=entry.points;
+    cost+=c.cost;
+    if(c.reward===null)pending++;
+    else{
+      reward+=c.reward;
+      if(entry.type==="lo")loHits+=c.hits;
+      else deHits+=c.hits;
+    }
+  });
+  return {totalPoints,loHits,deHits,cost,reward,pending,net:reward-cost};
+}
+function renderQuickEntrySaved(){
+  const target=$("#quickEntrySaved");
+  if(!target)return;
+  if(!canUsePlayerData()){
+    target.innerHTML='<p class="muted">Đăng nhập người chơi để xem dữ liệu vừa ghi.</p>';
+    return;
+  }
+  const date=$("#entryDate")?.value||today();
+  const memberId=isAdmin?$("#entryMember")?.value:currentPlayerId;
+  const entries=visibleEntries(state.entries)
+    .filter(entry=>entry.date===date&&(!memberId||entry.memberId===memberId))
+    .sort((a,b)=>(a.type==="lo"?0:1)-(b.type==="lo"?0:1)||b.points-a.points||a.number.localeCompare(b.number));
+  if(!entries.length){
+    target.innerHTML=`<div class="quick-saved-empty">Chưa có dữ liệu ghi cho ${displayDate(date)}.</div>`;
+    return;
+  }
+  const batches=quickSavedBatches(entries);
+  target.innerHTML=`<div class="quick-saved-head">
+    <strong>Đã ghi ${displayDate(date)}</strong>
+    <span>${batches.length} lần ghi · bấm vào từng dòng để xem cụ thể số điểm lô và đề</span>
+  </div>
+  <div class="table-wrap quick-saved-summary">
+    <table>
+      <thead><tr>
+        <th>Lần</th><th>Ngày</th><th>Tổng số đánh</th><th>Tổng điểm dự đoán</th><th>Số lô đúng</th><th>Số đề đúng</th><th>Điểm trừ</th><th>Điểm cộng</th><th>Chênh lệch</th>
+      </tr></thead>
+      <tbody>
+        ${batches.map((batch,index)=>{
+          const total=quickSavedBatchSummary(batch.entries);
+          const detailId=`quick-detail-${date.replace(/\D/g,"")}-${String(memberId||"all").replace(/\W/g,"")}-${String(batch.key).replace(/\W/g,"")}`;
+          return `<tr class="summary-row" onclick="toggleDayDetail('${detailId}')">
+            <td><strong>Lần ${index+1}</strong></td>
+            <td><strong>${displayDate(date)}</strong>${total.pending?`<br><small class="pending">${total.pending} lượt chờ</small>`:""}</td>
+            <td>${batch.entries.length}</td>
+            <td>${total.totalPoints}</td>
+            <td>${total.loHits}</td>
+            <td>${total.deHits}</td>
+            <td>${total.cost}</td>
+            <td>${total.pending?"-":total.reward}</td>
+            <td><span class="${total.pending?'pending':total.net>=0?'positive':'negative'}">${total.pending?"Chờ KQ":`${total.net>=0?'+':''}${total.net}`}</span></td>
+          </tr>
+          <tr id="${detailId}" class="detail-row">
+            <td colspan="9">${renderEntryDetails(batch.entries)}</td>
+          </tr>`;
+        }).join("")}
+      </tbody>
+    </table>
+  </div>`;
 }
 function uniqueNumbers(numbers){
   return numbers.filter((number,index,all)=>all.indexOf(number)===index);
@@ -817,18 +1049,20 @@ function renderManualNumberAnalysis(){
         <button class="secondary" type="button" data-copy-all data-text="${esc(combinedText)}" onclick="copyReferenceText(this.dataset.text)">Copy cả lô + đề</button>
       </div>
     </div>
-    <div class="reference-grid">
-      ${renderReferenceGroup("Lô phân bổ",analysis.lo,"lo",true)}
-      ${renderReferenceGroup("Đề phân bổ",analysis.de,"de",true)}
-    </div>
-    <div class="manual-analysis-grid">
-      <div class="manual-analysis-group">
-        <h4>Lô nên ưu tiên</h4>
-        ${renderManualAnalysisRows(analysis.loCandidates,analysis.lo,"lo")}
+    <div class="manual-analysis-horizontal">
+      <div class="reference-grid">
+        ${renderReferenceGroup("Lô phân bổ",analysis.lo,"lo",true)}
+        ${renderReferenceGroup("Đề phân bổ",analysis.de,"de",true)}
       </div>
-      <div class="manual-analysis-group">
-        <h4>Đề nên ưu tiên</h4>
-        ${renderManualAnalysisRows(analysis.deCandidates,analysis.de,"de")}
+      <div class="manual-analysis-grid">
+        <div class="manual-analysis-group">
+          <h4>Lô nên ưu tiên</h4>
+          ${renderManualAnalysisRows(analysis.loCandidates,analysis.lo,"lo")}
+        </div>
+        <div class="manual-analysis-group">
+          <h4>Đề nên ưu tiên</h4>
+          ${renderManualAnalysisRows(analysis.deCandidates,analysis.de,"de")}
+        </div>
       </div>
     </div>
     <p class="manual-analysis-note">Số “bỏ” là số chưa khớp rule đủ tốt trong kho dữ liệu, nên giảm điểm hoặc loại để đỡ âm.</p>
@@ -1142,9 +1376,7 @@ $$(".tab").forEach(btn=>btn.addEventListener("click",()=>{
 $$(".subtab").forEach(btn=>btn.addEventListener("click",()=>{
   $$(".subtab").forEach(x=>x.classList.toggle("active",x===btn));
   $$(".subtab-panel").forEach(x=>x.classList.toggle("active",x.id===`stats-${btn.dataset.subtab}`));
-  if(btn.dataset.subtab==="forecast")deferRender(renderForecastStats,"#forecastStats");
-  else if(btn.dataset.subtab==="patterns")deferRender(renderPatternStats,"#patternStats");
-  else render();
+  render();
 }));
 
 $("#adminForm").addEventListener("submit",async e=>{
@@ -1242,7 +1474,7 @@ $("#resultImage").addEventListener("change",e=>{
   if(file) fileToDataUrl(file,handleIncomingImage);
 });
 
-$("#entryForm").addEventListener("submit",e=>{
+$("#entryForm")?.addEventListener("submit",e=>{
   e.preventDefault();
   if(!requirePlayerOrAdmin())return;
   const memberId=isAdmin?$("#entryMember").value:currentPlayerId;
@@ -1255,43 +1487,60 @@ $("#entryForm").addEventListener("submit",e=>{
   $("#entryNumber").value=""; save();
 });
 
-$("#quickEntryBtn").addEventListener("click",()=>{
+$("#quickCalcBtn").addEventListener("click",renderQuickEntryPreview);
+$("#quickEntryText").addEventListener("input",()=>{
+  $("#quickEntryPreview").innerHTML="";
+  $("#quickEntryStatus").textContent="";
+});
+$("#entryDate")?.addEventListener("change",renderQuickEntrySaved);
+$("#entryMember")?.addEventListener("change",renderQuickEntrySaved);
+$("#quickEntryPreview").addEventListener("input",event=>{
+  if(event.target.matches("[data-quick-points-input]"))updateQuickEntryTotals();
+});
+$("#quickEntryPreview").addEventListener("click",event=>{
+  if(event.target.id==="quickEntryBtn")commitQuickEntry();
+  if(event.target.id==="quickCopyBtn")copyQuickEntryPreview();
+});
+function commitQuickEntry(){
   if(!requirePlayerOrAdmin())return;
   const date=$("#entryDate").value;
   const memberId=isAdmin?$("#entryMember").value:currentPlayerId;
   if(!memberId){alert("Chưa chọn người chơi.");return}
-  const lines=$("#quickEntryText").value.split(/\r?\n|;/).map(x=>x.trim()).filter(Boolean);
-  if(!lines.length){
+  if(!document.querySelectorAll("#quickEntryPreview [data-quick-row]").length)renderQuickEntryPreview();
+  const rows=[...document.querySelectorAll("#quickEntryPreview [data-quick-row]")];
+  if(!rows.length){
     $("#quickEntryStatus").textContent="Chưa có nội dung.";
     return;
   }
   let added=0;
   let addedPoints=0;
-  const failed=[];
-  lines.forEach(line=>{
-    const parsed=parseQuickEntryLine(line);
-    if(!parsed){failed.push(line);return}
-    const batchId=parsed.groupLabel?uid():"";
-    const batchLabel=parsed.groupLabel||"";
-    parsed.numbers.forEach(number=>{
-      state.entries.push({id:uid(),date,memberId,type:parsed.type,number,points:parsed.points,batchId,batchLabel});
+  const quickBatchId=uid();
+  const quickBatchCreatedAt=Date.now();
+  rows.forEach(row=>{
+    const type=row.dataset.type;
+    const numbers=String(row.dataset.numbers||"").split("-").filter(Boolean);
+    const points=Math.max(0,Number(row.querySelector("[data-quick-points-input]")?.value)||0);
+    if(!numbers.length||!points)return;
+    const batchLabel=row.dataset.groupLabel||"";
+    numbers.forEach(number=>{
+      state.entries.push({id:uid(),date,memberId,type,number,points,batchId:quickBatchId,batchLabel,batchCreatedAt:quickBatchCreatedAt});
       added++;
-      addedPoints+=parsed.points;
+      addedPoints+=points;
     });
   });
   if(added){
     $("#quickEntryText").value="";
+    $("#quickEntryPreview").innerHTML="";
     save();
   }else render();
-  $("#quickEntryStatus").textContent=failed.length?
-    `Đã thêm ${added} lượt, tổng điểm ${addedPoints}, lỗi ${failed.length} dòng.`:
-    `Đã thêm ${added} lượt, tổng điểm ${addedPoints}.`;
-});
+  $("#quickEntryStatus").textContent=`Đã thêm ${added} lượt, tổng điểm ${addedPoints}.`;
+  renderQuickEntrySaved();
+}
 $("#analyzeNumbersBtn")?.addEventListener("click",renderManualNumberAnalysis);
-$("#doubleBridgeWeekSelect")?.addEventListener("change",renderLongTermDoubleBridge);
+$("#doubleBridgeStatsWeekSelect")?.addEventListener("change",()=>renderLongTermDoubleBridge("#statsLongTermDoubleBridge","#doubleBridgeStatsWeekSelect"));
 
-$("#entryType").addEventListener("change",()=>{
-  $("#entryPoints").value=$("#entryType").value==="de"?10:1;
+$("#entryType")?.addEventListener("change",()=>{
+  if($("#entryPoints"))$("#entryPoints").value=$("#entryType").value==="de"?10:1;
 });
 $("#filterDate").addEventListener("change",render);
 $("#clearFilter").addEventListener("click",()=>{$("#filterDate").value="";render()});
@@ -1323,6 +1572,10 @@ $("#topBtn").addEventListener("click",()=>{
 window.addEventListener("scroll",updateFloatScrollButton,{passive:true});
 window.addEventListener("resize",updateFloatScrollButton);
 $("#specialYear").addEventListener("change",renderSpecialStats);
+$("#dbBridgeBaseDate").addEventListener("change",()=>{
+  patternBaseState.dbbridge.manual=true;
+  renderDbBridgeStats();
+});
 $("#patternYear").addEventListener("change",()=>{
   patternBaseState.forecast.manual=false;
   deferRender(renderForecastStats,"#forecastStats");
@@ -1598,6 +1851,7 @@ function lotoNumbers(result){
 
 function renderMembers(){
   const members=visibleMembers();
+  const selectedMember=$("#entryMember")?.value||"";
   if(!isAdmin&&!currentPlayer()){
     $("#memberList").innerHTML='<p class="muted">Đăng nhập QTV để quản lý người chơi.</p>';
     $("#entryMember").innerHTML='<option value="">Đăng nhập trước</option>';
@@ -1614,6 +1868,7 @@ function renderMembers(){
     </span></div>`).join(""):
     '<p class="muted">Chưa có thành viên.</p>';
   $("#entryMember").innerHTML=members.map(m=>`<option value="${m.id}">${esc(m.name)}</option>`).join("");
+  if(members.some(m=>m.id===selectedMember))$("#entryMember").value=selectedMember;
   $("#entryMember").disabled=!isAdmin;
 }
 
@@ -1699,30 +1954,33 @@ function buildFixedDoublePlan(saturday,dayRows,stake=3,remainingStake=3,progress
 function setDoubleBridgeAfterHitMode(value){
   const points=Math.max(0,Number(value)||0);
   localStorage.setItem("double-bridge-remaining-stake",String(points));
-  renderLongTermDoubleBridge();
+  renderAllLongTermDoubleBridge();
 }
 window.setDoubleBridgeAfterHitMode=setDoubleBridgeAfterHitMode;
 function setDoubleBridgeProgression(value){
   localStorage.setItem("double-bridge-progression",value);
-  renderLongTermDoubleBridge();
+  renderAllLongTermDoubleBridge();
 }
 window.setDoubleBridgeProgression=setDoubleBridgeProgression;
 function setDoubleBridgeStatsRange(value){
   localStorage.setItem("double-bridge-stats-range",value);
-  renderLongTermDoubleBridge();
+  renderAllLongTermDoubleBridge();
 }
 window.setDoubleBridgeStatsRange=setDoubleBridgeStatsRange;
 function setDoubleBridgeStatsPeriod(value){
   const range=localStorage.getItem("double-bridge-stats-range")||"month";
   localStorage.setItem(`double-bridge-stats-period-${range}`,value);
-  renderLongTermDoubleBridge();
+  renderAllLongTermDoubleBridge();
 }
 window.setDoubleBridgeStatsPeriod=setDoubleBridgeStatsPeriod;
+function renderAllLongTermDoubleBridge(){
+  renderLongTermDoubleBridge("#statsLongTermDoubleBridge","#doubleBridgeStatsWeekSelect");
+}
 
-function renderLongTermDoubleBridge(){
-  const target=$("#longTermDoubleBridge");
+function renderLongTermDoubleBridge(targetSelector="#longTermDoubleBridge",selectSelector="#doubleBridgeWeekSelect"){
+  const target=$(targetSelector);
   if(!target)return;
-  const select=$("#doubleBridgeWeekSelect");
+  const select=$(selectSelector);
   const saturdays=stateCache.resultsDesc.filter(result=>isSaturday(result.date)&&result.prizes?.length>=26);
   if(!saturdays.length){
     if(select)select.innerHTML='<option value="">Chưa có tuần đủ dữ liệu</option>';
@@ -2320,6 +2578,78 @@ function renderSpecialStatTable(rows,showGap){
     </tr>`).join("")}</tbody></table>`;
 }
 
+function syncDbBridgeBaseDate(){
+  const input=$("#dbBridgeBaseDate");
+  const tracker=patternBaseState.dbbridge;
+  const latest=stateCache.resultsDesc.find(r=>r?.special)?.date||"";
+  if(!input)return "";
+  if(latest&&tracker.latest!==latest){
+    tracker.latest=latest;
+    tracker.manual=false;
+  }
+  if(latest&&(!tracker.manual||!input.value||!stateCache.resultsByDate.has(input.value))){
+    input.value=latest;
+  }
+  return input.value;
+}
+
+function renderDbBridgeStats(){
+  syncDbBridgeBaseDate();
+  const analysis=buildDbBridgeAnalysis($("#dbBridgeBaseDate").value);
+  const target=$("#dbBridgeStats");
+  if(!analysis.baseResult){
+    target.innerHTML='<p class="muted">Chưa có dữ liệu giải đặc biệt để soi cầu.</p>';
+    return;
+  }
+  const hitRate=analysis.rows.length?Math.round(analysis.hitDays/analysis.rows.length*100):0;
+  const copyText=analysis.prediction.map(row=>`lô ${row.number}`).join(" ");
+  target.innerHTML=`
+    <div class="stat-grid db-bridge-summary">
+      <div class="stat-card">Khoảng soi<strong>${displayDate(analysis.start)} - ${displayDate(analysis.end)}</strong><small>3 tháng gần nhất theo ngày soi</small></div>
+      <div class="stat-card">Ngày soi<strong>${displayDate(analysis.baseDate)}</strong><small>ĐB ${esc(analysis.baseResult.special)}</small></div>
+      <div class="stat-card">Ngày ghép tiếp<strong>${displayDate(analysis.forecastDate)}</strong><small>${analysis.rows.length} mẫu đã chấm</small></div>
+      <div class="stat-card">Ngày có cầu ăn lô<strong>${analysis.hitDays}/${analysis.rows.length}</strong><small>${hitRate}% có ít nhất 1 cặp khớp</small></div>
+    </div>
+    <div class="reference-group db-bridge-picks">
+      <strong>Cầu Đặc biệt tham khảo cho ${displayDate(analysis.forecastDate)}</strong>
+      <div class="reference-numbers">${analysis.prediction.map(row=>`<span>${row.number}<small>${Math.round(row.rate*100)}%</small></span>`).join("")}</div>
+      ${copyText?`<small>${esc(copyText)}</small><button class="secondary" type="button" data-text="${esc(copyText)}" onclick="copyReferenceText(this.dataset.text)">Copy dãy lô</button>`:""}
+    </div>
+    <div class="pattern-grid db-bridge-grid">
+      <div>
+        <h3>Tỷ lệ từng cầu</h3>
+        ${renderDbBridgeRuleTable(analysis.allRules)}
+      </div>
+      <div>
+        <h3>Lịch sử khớp gần nhất</h3>
+        ${renderDbBridgeHistoryTable(analysis.rows.slice(0,30))}
+      </div>
+    </div>`;
+}
+
+function renderDbBridgeRuleTable(rows){
+  if(!rows.length)return '<p class="muted">Chưa đủ dữ liệu để chấm cầu.</p>';
+  return `<table class="special-table db-bridge-table"><thead><tr><th>Cầu</th><th>Số hôm nay</th><th>Trúng lô hôm sau</th><th>Gần nhất</th></tr></thead>
+    <tbody>${rows.map(row=>`
+      <tr>
+        <td>${esc(row.label)}</td>
+        <td><strong>${row.number}</strong></td>
+        <td>${row.hit}/${row.total} · ${Math.round(row.rate*100)}%</td>
+        <td>${row.lastHitDate?displayDate(row.lastHitDate):"-"}</td>
+      </tr>`).join("")}</tbody></table>`;
+}
+
+function renderDbBridgeHistoryTable(rows){
+  if(!rows.length)return '<p class="muted">Chưa có cặp ngày liền kề trong khoảng soi.</p>';
+  return `<table class="special-table db-bridge-table"><thead><tr><th>ĐB gốc</th><th>Ngày hôm sau</th><th>Cặp khớp lô</th></tr></thead>
+    <tbody>${rows.map(row=>`
+      <tr class="${row.hitRules.length?'history-positive':'history-negative'}">
+        <td>${displayDate(row.baseDate)}<br><strong>${esc(row.baseSpecial)}</strong></td>
+        <td>${displayDate(row.nextDate)}<br><small>ĐB ${esc(row.nextSpecial)}</small></td>
+        <td>${row.hitRules.length?row.hitRules.map(rule=>`<span class="hit-number">${rule.number}</span> <small>${esc(rule.label)}</small>`).join("<br>"):"-"}</td>
+      </tr>`).join("")}</tbody></table>`;
+}
+
 function renderPatternYearOptions(){
   const select=$("#patternYear");
   const current=select.value;
@@ -2367,6 +2697,79 @@ function addDate(date,days){
 
 function reverse2(number){
   return String(number).padStart(2,"0").split("").reverse().join("");
+}
+
+function dbBridgeRules(result){
+  const special=String(result?.special||"").replace(/\D/g,"").padStart(5,"0").slice(-5);
+  if(!special||special.length<5)return [];
+  const digits=special.split("");
+  return [
+    {key:"first2",label:"2 số đầu ĐB",number:`${digits[0]}${digits[1]}`},
+    {key:"first2-reverse",label:"Đảo 2 số đầu ĐB",number:`${digits[1]}${digits[0]}`},
+    {key:"last2",label:"2 số cuối ĐB",number:`${digits[3]}${digits[4]}`},
+    {key:"last2-reverse",label:"Đảo 2 số cuối ĐB",number:`${digits[4]}${digits[3]}`},
+    {key:"first-last",label:"Ghép đầu + cuối ĐB",number:`${digits[0]}${digits[4]}`},
+    {key:"last-first",label:"Ghép lộn đầu + cuối ĐB",number:`${digits[4]}${digits[0]}`}
+  ].map(rule=>({...rule,number:two(rule.number)}));
+}
+
+function buildDbBridgeAnalysis(baseDateValue){
+  const latest=stateCache.resultsDesc.find(r=>r?.special)?.date||"";
+  const baseDate=baseDateValue&&stateCache.resultsByDate.has(baseDateValue)?baseDateValue:latest;
+  const baseResult=baseDate?stateCache.resultsByDate.get(baseDate):null;
+  const start=baseDate?addDate(baseDate,-92):"";
+  const end=baseDate||latest;
+  const results=stateCache.results.filter(r=>r.special&&r.date>=start&&r.date<=end);
+  const byDate=stateCache.resultsByDate;
+  const ruleStats=new Map();
+  const rows=[];
+  results.forEach(result=>{
+    const nextDate=addDate(result.date,1);
+    const next=byDate.get(nextDate);
+    if(!next)return;
+    const nextLoto=new Set(lotoNumbers(next));
+    const checked=dbBridgeRules(result).map(rule=>{
+      const stat=ruleStats.get(rule.key)||{...rule,total:0,hit:0,lastHitDate:"",examples:[]};
+      const isHit=nextLoto.has(rule.number);
+      stat.total++;
+      if(isHit){
+        stat.hit++;
+        stat.lastHitDate=result.date;
+        stat.examples.push({baseDate:result.date,nextDate,nextSpecial:next.special,number:rule.number});
+      }
+      ruleStats.set(rule.key,stat);
+      return {...rule,hit:isHit};
+    });
+    const hitRules=checked.filter(rule=>rule.hit);
+    rows.push({baseDate:result.date,nextDate,nextSpecial:next.special,baseSpecial:result.special,checked,hitRules});
+  });
+  const currentRules=baseResult?dbBridgeRules(baseResult):[];
+  const currentByKey=new Map(currentRules.map(rule=>[rule.key,rule]));
+  const prediction=currentRules.map(rule=>{
+    const stat=ruleStats.get(rule.key)||{...rule,total:0,hit:0,lastHitDate:"",examples:[]};
+    const rate=stat.total?stat.hit/stat.total:0;
+    return {...stat,...rule,rate,total:stat.total,hit:stat.hit,lastHitDate:stat.lastHitDate,examples:stat.examples};
+  }).sort((a,b)=>b.rate-a.rate||b.hit-a.hit||String(b.lastHitDate).localeCompare(String(a.lastHitDate))||a.number.localeCompare(b.number));
+  const allRules=[...ruleStats.values()].map(rule=>({
+    ...rule,
+    ...(currentByKey.get(rule.key)||{}),
+    rate:rule.total?rule.hit/rule.total:0,
+    total:rule.total,
+    hit:rule.hit,
+    lastHitDate:rule.lastHitDate
+  }))
+    .sort((a,b)=>b.rate-a.rate||b.hit-a.hit||a.label.localeCompare(b.label));
+  return {
+    baseDate,
+    baseResult,
+    forecastDate:baseDate?addDate(baseDate,1):"",
+    start,
+    end,
+    rows:rows.sort((a,b)=>b.baseDate.localeCompare(a.baseDate)),
+    hitDays:rows.filter(row=>row.hitRules.length).length,
+    prediction,
+    allRules
+  };
 }
 
 function sumDigits2(number){
@@ -3428,8 +3831,7 @@ function render(){
   const activeSubtab=$(".subtab.active")?.dataset.subtab||"results";
   if(activeTab==="predict"){
     renderMembers();
-    renderLongTermDoubleBridge();
-    renderEntries();
+    renderQuickEntrySaved();
     refreshManualAnalysisIfOpen();
   }else if(activeTab==="stats"){
     if(activeSubtab==="results"){
@@ -3438,12 +3840,17 @@ function render(){
       renderResultStats();
     }else if(activeSubtab==="special"){
       renderSpecialStats();
-    }else if(activeSubtab==="forecast"){
-      deferRender(renderForecastStats,"#forecastStats");
-    }else if(activeSubtab==="patterns"){
-      deferRender(renderPatternStats,"#patternStats");
     }
+  }else if(activeTab==="dbbridge"){
+    renderDbBridgeStats();
+  }else if(activeTab==="doublebridge"){
+    renderLongTermDoubleBridge("#statsLongTermDoubleBridge","#doubleBridgeStatsWeekSelect");
+  }else if(activeTab==="forecast"){
+    deferRender(renderForecastStats,"#forecastStats");
+  }else if(activeTab==="patterns"){
+    deferRender(renderPatternStats,"#patternStats");
   }else if(activeTab==="report"){
+    renderEntries();
     renderReport();
     renderLeaderboard();
   }
