@@ -44,6 +44,14 @@ const localDate=d=>{
   const day=String(d.getDate()).padStart(2,"0");
   return `${y}-${m}-${day}`;
 };
+function normalizeDateValue(value){
+  const s=String(value||"").trim();
+  let m=s.match(/^(\d{4})[-/](\d{1,2})[-/](\d{1,2})/);
+  if(m)return `${m[1]}-${String(m[2]).padStart(2,"0")}-${String(m[3]).padStart(2,"0")}`;
+  m=s.match(/^(\d{1,2})[-/](\d{1,2})[-/](\d{4})/);
+  if(m)return `${m[3]}-${String(m[2]).padStart(2,"0")}-${String(m[1]).padStart(2,"0")}`;
+  return s;
+}
 const today=()=>localDate(new Date());
 const addDays=n=>{const d=new Date();d.setDate(d.getDate()+n);return localDate(d)};
 const yesterday=()=>addDays(-1);
@@ -58,7 +66,8 @@ function normalizeState(data){
   const safe=data&&typeof data==="object"?data:{};
   const resultsByDate=new Map();
   (Array.isArray(safe.results)?safe.results:[]).forEach(({image,...r})=>{
-    if(r?.date) resultsByDate.set(r.date,r);
+    const date=normalizeDateValue(r?.date);
+    if(date) resultsByDate.set(date,{...r,date});
   });
   return {
     members:(Array.isArray(safe.members)?safe.members:[]).map(m=>({
@@ -84,6 +93,13 @@ function stateStats(data){
 function stateStatsText(data){
   const s=stateStats(data);
   return `${s.members} người chơi, ${s.entries} lượt dự đoán, ${s.results} ngày kết quả`;
+}
+function mergeResultsByDate(...resultLists){
+  const map=new Map();
+  resultLists.flat().filter(Boolean).forEach(result=>{
+    if(result?.date)map.set(result.date,result);
+  });
+  return [...map.values()];
 }
 
 function hasPlayerData(data){
@@ -490,11 +506,11 @@ async function loadCloudPredictions(){
     const cloud=await fetchCloudDataForCheck(false);
     if(!cloud)return;
     const incoming=normalizeState(cloud.data);
-    const localResults=state.results;
+    const mergedResults=mergeResultsByDate(incoming.results,state.results);
     makeLocalBackup("before-load-cloud-predictions");
-    state=normalizeState({...state,members:incoming.members,entries:incoming.entries,results:localResults});
+    state=normalizeState({...state,members:incoming.members,entries:incoming.entries,results:mergedResults});
     save();
-    setCloudStatus(`${cloudDetailMessage("Đã lấy cloud dự đoán.",{...state,results:localResults},cloud.updatedAt)}\nKết quả trên máy được giữ nguyên: ${localResults.length} ngày.`);
+    setCloudStatus(`${cloudDetailMessage("Đã lấy cloud dự đoán.",state,cloud.updatedAt)}\nKết quả đã gộp theo ngày: ${mergedResults.length} ngày.`);
     alert("Lấy cloud dự đoán thành công.");
   }catch(err){
     setCloudStatus(`Lấy cloud dự đoán lỗi: ${err.message||err}`,false);
@@ -509,13 +525,14 @@ async function saveCloudPredictions(){
     const cloud=await fetchCloudDataForCheck(false);
     const cloudData=normalizeState(cloud?.data||EMPTY_STATE);
     const updatedAt=cloud?.updatedAt||"";
+    const mergedResults=mergeResultsByDate(cloudData.results,state.results);
     const merged=normalizeState({
       members:state.members,
       entries:state.entries,
-      results:cloudData.results?.length?cloudData.results:state.results
+      results:mergedResults
     });
     await postCloudState(merged);
-    setCloudStatus(`${cloudDetailMessage("Đã lưu cloud dự đoán.",{...state,results:merged.results},updatedAt)}\nKết quả trên cloud được giữ nguyên: ${merged.results.length} ngày.`);
+    setCloudStatus(`${cloudDetailMessage("Đã lưu cloud dự đoán.",{...state,results:merged.results},updatedAt)}\nKết quả đã gộp theo ngày: ${merged.results.length} ngày.`);
     alert("Lưu cloud dự đoán thành công.");
   }catch(err){
     setCloudStatus(`Lưu cloud dự đoán lỗi: ${err.message||err}`,false);
@@ -1691,6 +1708,7 @@ $("#importCsvBtn").addEventListener("click",async()=>{
       return;
     }
     if(stats.latestDate)$("#reportDate").value=stats.latestDate;
+    if(stats.latestDate)$("#resultSelect").value=stats.latestDate;
     save();
     alert(`Đã import ${stats.imported} ngày. Ghi đè ${stats.updated} ngày trùng. Bỏ qua ${stats.skipped} dòng lỗi.`);
   }catch(err){
@@ -2431,13 +2449,16 @@ function renderResultStats(){
   const allDates=stateCache.resultsDesc.map(r=>r.date);
   const dates=filterResultStatDates(allDates);
   const rangeLabel=resultStatsRangeLabel($("#resultStatsRange").value,dates.length,allDates.length);
+  const todayResult=resultForDate(today());
   $("#resultStats").innerHTML=`
     <div class="stat-grid">
       <div class="stat-card">Ngày có kết quả<strong>${state.results.length}</strong></div>
       <div class="stat-card">Lượt đã nhập<strong>${entries.length}</strong></div>
       <div class="stat-card">Lượt chờ chấm<strong>${all.pending}</strong></div>
+      <div class="stat-card ${todayResult?'result-hit':''}">KQ hôm nay ${displayDate(today())}<strong>${todayResult?`ĐB ${esc(todayResult.special)}`:"Chưa có"}</strong><small>${todayResult?`${todayResult.prizes.length} giải đã lưu`:"Ngày này chưa nằm trong dữ liệu máy"}</small></div>
     </div>
     <p class="muted result-range-note">${rangeLabel}</p>
+    ${todayResult?"":`<p class="muted result-range-note">Nếu Cầu đặc biệt hiện ${displayDate(today())}, đó có thể là ngày dự đoán tiếp theo. Muốn chấm kết quả hôm nay thì cần nhập hoặc cập nhật CSV có ngày ${displayDate(today())}.</p>`}
     <div class="result-list">
       ${dates.length?dates.map(date=>{
         const r=resultForDate(date);
@@ -2454,7 +2475,11 @@ function renderResultStats(){
 
 function filterResultStatDates(dates){
   const range=$("#resultStatsRange")?.value||"7";
-  if(range==="7")return dates.slice(0,7);
+  const includeToday=filtered=>{
+    const day=today();
+    return stateCache.resultsByDate.has(day)&&!filtered.includes(day)?[day,...filtered]:filtered;
+  };
+  if(range==="7")return includeToday(dates.slice(0,7));
   if(range==="all")return dates;
   const base=dates[0]||today();
   let start="";
@@ -2466,7 +2491,7 @@ function filterResultStatDates(dates){
     const qStart=String(Math.floor((month-1)/3)*3+1).padStart(2,"0");
     start=`${year}-${qStart}-01`;
   }else if(range==="year")start=`${base.slice(0,4)}-01-01`;
-  return start?dates.filter(date=>date>=start&&date<=base):dates.slice(0,7);
+  return includeToday(start?dates.filter(date=>date>=start&&date<=base):dates.slice(0,7));
 }
 
 function resultStatsRangeLabel(range,count,total){
@@ -2603,11 +2628,12 @@ function renderDbBridgeStats(){
   }
   const hitRate=analysis.rows.length?Math.round(analysis.hitDays/analysis.rows.length*100):0;
   const copyText=analysis.prediction.map(row=>`lô ${row.number}`).join(" ");
+  const forecastResult=resultForDate(analysis.forecastDate);
   target.innerHTML=`
     <div class="stat-grid db-bridge-summary">
       <div class="stat-card">Khoảng soi<strong>${displayDate(analysis.start)} - ${displayDate(analysis.end)}</strong><small>3 tháng gần nhất theo ngày soi</small></div>
       <div class="stat-card">Ngày soi<strong>${displayDate(analysis.baseDate)}</strong><small>ĐB ${esc(analysis.baseResult.special)}</small></div>
-      <div class="stat-card">Ngày ghép tiếp<strong>${displayDate(analysis.forecastDate)}</strong><small>${analysis.rows.length} mẫu đã chấm</small></div>
+      <div class="stat-card">Ngày dự đoán tiếp<strong>${displayDate(analysis.forecastDate)}</strong><small>${forecastResult?`Đã có KQ ĐB ${esc(forecastResult.special)}`:"Chưa có KQ đã lưu"} · ${analysis.rows.length} mẫu đã chấm</small></div>
       <div class="stat-card">Ngày có cầu ăn lô<strong>${analysis.hitDays}/${analysis.rows.length}</strong><small>${hitRate}% có ít nhất 1 cặp khớp</small></div>
     </div>
     <div class="reference-group db-bridge-picks">
