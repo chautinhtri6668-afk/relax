@@ -227,12 +227,14 @@ async function initPersistentState(){
       storageOk=true;
       lastSaveMessage="Đã tải dữ liệu đã lưu";
       render();
+      maybeAutoLoadCloudForNewPlayer();
       return;
     }
   }catch{
     if(!loadHadError)lastSaveMessage="Đang dùng bộ lưu trình duyệt cũ.";
   }
   save();
+  maybeAutoLoadCloudForNewPlayer();
 }
 
 function save(){
@@ -481,6 +483,21 @@ async function loadCloudForPlayer(){
     const message=`Tải cloud lỗi: ${err.message||err}`;
     setCloudStatus(message,false);
     alert(message);
+  }
+}
+async function maybeAutoLoadCloudForNewPlayer(){
+  if(isAdmin||currentPlayerId||!ensureCloudConfig()||hasPlayerData(state))return;
+  setCloudStatus("Đang tự tải cloud cho người chơi mới...");
+  try{
+    const cloud=await fetchCloudDataForCheck(true);
+    if(!cloud)return;
+    state=normalizeState(cloud.data);
+    currentPlayerId="";
+    sessionStorage.removeItem("so-diem-vui-player");
+    save();
+    setCloudStatus(`Đã tự tải cloud: ${stateStatsText(state)}. Chọn tên người chơi rồi nhập mật khẩu để vào.`);
+  }catch(err){
+    setCloudStatus(`Tự tải cloud lỗi: ${err.message||err}. Có thể bấm Tải cloud để thử lại.`,false);
   }
 }
 async function saveCloudState(){
