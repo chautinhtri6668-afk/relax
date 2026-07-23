@@ -13,6 +13,7 @@ const REFERENCE_MODE_KEY="so-diem-vui-reference-mode";
 const REFERENCE_MONTH_KEY="so-diem-vui-reference-month";
 const LAW_MODE_KEY="so-diem-vui-law-mode";
 const LAW_MONTH_KEY="so-diem-vui-law-month";
+const DBBRIDGE_CANG3_YEARS_KEY="so-diem-vui-dbbridge-cang3-years";
 const XSMB_CSV_URL="https://raw.githubusercontent.com/khiemdoan/vietnam-lottery-xsmb-analysis/refs/heads/main/data/xsmb.csv";
 const EMPTY_STATE={members:[],results:[],entries:[]};
 const AUTO_HISTORY_LIMIT=720;
@@ -59,6 +60,9 @@ $("#resultDate").value=today(); $("#entryDate").value=today();
 applyCloudConfigFromUrl();
 $("#referenceMode").value=localStorage.getItem(REFERENCE_MODE_KEY)||"fun";
 $("#referenceBacktestMonth").value=localStorage.getItem(REFERENCE_MONTH_KEY)||today().slice(0,7);
+if($("#dbBridgeReferenceMode"))$("#dbBridgeReferenceMode").value=localStorage.getItem(REFERENCE_MODE_KEY)||"fun";
+if($("#dbBridgeBacktestMonth"))$("#dbBridgeBacktestMonth").value=localStorage.getItem(REFERENCE_MONTH_KEY)||today().slice(0,7);
+if($("#dbBridgeCang3Years"))$("#dbBridgeCang3Years").value=localStorage.getItem(DBBRIDGE_CANG3_YEARS_KEY)||"3";
 $("#lawReferenceMode").value=localStorage.getItem(LAW_MODE_KEY)||"fun";
 $("#lawBacktestMonth").value=localStorage.getItem(LAW_MONTH_KEY)||today().slice(0,7);
 
@@ -319,6 +323,9 @@ function applyAppConfig(config={}){
   if(config.lawMonth)localStorage.setItem(LAW_MONTH_KEY,config.lawMonth);
   if($("#referenceMode"))$("#referenceMode").value=localStorage.getItem(REFERENCE_MODE_KEY)||"fun";
   if($("#referenceBacktestMonth"))$("#referenceBacktestMonth").value=localStorage.getItem(REFERENCE_MONTH_KEY)||today().slice(0,7);
+  if($("#dbBridgeReferenceMode"))$("#dbBridgeReferenceMode").value=localStorage.getItem(REFERENCE_MODE_KEY)||"fun";
+  if($("#dbBridgeBacktestMonth"))$("#dbBridgeBacktestMonth").value=localStorage.getItem(REFERENCE_MONTH_KEY)||today().slice(0,7);
+  if($("#dbBridgeCang3Years"))$("#dbBridgeCang3Years").value=localStorage.getItem(DBBRIDGE_CANG3_YEARS_KEY)||"3";
   if($("#lawReferenceMode"))$("#lawReferenceMode").value=localStorage.getItem(LAW_MODE_KEY)||"fun";
   if($("#lawBacktestMonth"))$("#lawBacktestMonth").value=localStorage.getItem(LAW_MONTH_KEY)||today().slice(0,7);
   if(isAdmin)fillCloudForm();
@@ -486,16 +493,22 @@ async function loadCloudForPlayer(){
   }
 }
 async function maybeAutoLoadCloudForNewPlayer(){
-  if(isAdmin||currentPlayerId||!ensureCloudConfig()||hasPlayerData(state))return;
-  setCloudStatus("Đang tự tải cloud cho người chơi mới...");
+  if(isAdmin||!ensureCloudConfig())return;
+  setCloudStatus("Đang tự tải dữ liệu cloud...");
   try{
     const cloud=await fetchCloudDataForCheck(true);
     if(!cloud)return;
+    const previousPlayerId=currentPlayerId;
     state=normalizeState(cloud.data);
-    currentPlayerId="";
-    sessionStorage.removeItem("so-diem-vui-player");
+    if(previousPlayerId&&state.members.some(member=>member.id===previousPlayerId)){
+      currentPlayerId=previousPlayerId;
+      sessionStorage.setItem("so-diem-vui-player",currentPlayerId);
+    }else{
+      currentPlayerId="";
+      sessionStorage.removeItem("so-diem-vui-player");
+    }
     save();
-    setCloudStatus(`Đã tự tải cloud: ${stateStatsText(state)}. Chọn tên người chơi rồi nhập mật khẩu để vào.`);
+    setCloudStatus(`Đã tự tải cloud mới nhất: ${stateStatsText(state)}${currentPlayerId?"":" Chọn tên người chơi rồi nhập mật khẩu để vào."}`);
   }catch(err){
     setCloudStatus(`Tự tải cloud lỗi: ${err.message||err}. Có thể bấm Tải cloud để thử lại.`,false);
   }
@@ -672,6 +685,21 @@ function stripOcrDates(text){
     .replace(/\b20\d{2}\s*[-/.]\s*[01]?\d\s*[-/.]\s*[0-3]?\d\b/g," ");
 }
 function two(v){return String(v).replace(/\D/g,"").slice(-2).padStart(2,"0")}
+function three(v){return String(v).replace(/\D/g,"").slice(-3).padStart(3,"0")}
+const ENTRY_TYPES=["lo","de","cang3"];
+function entryTypeLabel(type){
+  return type==="lo"?"Lô":type==="cang3"?"3 càng":"Đề";
+}
+function entryTypeShort(type){
+  return type==="lo"?"L":type==="cang3"?"3C":"Đ";
+}
+function entryTypeSuffix(type){
+  return type==="lo"?"đ":"k";
+}
+function entryTypeOrder(type){
+  const index=ENTRY_TYPES.indexOf(type);
+  return index>=0?index:ENTRY_TYPES.length;
+}
 function normalizePrizes(text){
   return String(text).split(/\s+/).map(x=>x.replace(/\D/g,"")).filter(Boolean);
 }
@@ -702,6 +730,12 @@ function parseQuickEntryLine(line){
     const groupLabel=tails.map(tail=>`0${tail} -> 9${tail}`).join(", ");
     return {type,numbers,points,groupLabel};
   }
+  const chunks=numberPart.match(/\d+/g)||[];
+  const cang3Numbers=chunks.filter(chunk=>chunk.length===3).map(three).filter((n,i,a)=>a.indexOf(n)===i);
+  if(cang3Numbers.length&&chunks.every(chunk=>chunk.length===3)){
+    if(!Number.isFinite(points)||points<=0)points=10;
+    return {type:"cang3",numbers:cang3Numbers,points,groupLabel:""};
+  }
   const numbers=(numberPart.match(/\d{1,2}/g)||[]).map(two).filter((n,i,a)=>a.indexOf(n)===i);
   if(!numbers.length)return null;
   const type=suffix==="k"?"de":suffix==="đ"||suffix==="d"||suffix==="điểm"||suffix==="diem"?"lo":$("#entryType").value;
@@ -713,11 +747,11 @@ function quickEntryCost(type,numbers,points){
   return type==="lo"?count*points*23:count*points;
 }
 function quickEntryCopyLinesFromRows(rows){
-  return ["lo","de"].map(type=>{
+  return ENTRY_TYPES.map(type=>{
     const typeRows=rows.filter(row=>row.dataset.type===type);
     if(!typeRows.length)return "";
-    const title=type==="lo"?"Lô":"Đề";
-    const suffix=type==="lo"?"đ":"k";
+    const title=entryTypeLabel(type);
+    const suffix=entryTypeSuffix(type);
     return `${title}: `+typeRows.map(row=>{
       const numbers=String(row.dataset.numbers||"").split("-").filter(Boolean).join(" - ");
       const points=Math.max(0,Number(row.querySelector("[data-quick-points-input]")?.value)||0);
@@ -757,7 +791,8 @@ function renderQuickEntryPreview(){
   const totalCost=draft.rows.reduce((sum,row)=>sum+quickEntryCost(row.type,row.numbers,row.points),0);
   const groupTotals={
     lo:{turns:0,cost:0},
-    de:{turns:0,cost:0}
+    de:{turns:0,cost:0},
+    cang3:{turns:0,cost:0}
   };
   draft.rows.forEach(row=>{
     if(!groupTotals[row.type])return;
@@ -766,7 +801,7 @@ function renderQuickEntryPreview(){
   });
   const renderGroup=type=>{
     const rows=draft.rows.filter(row=>row.type===type);
-    const title=type==="lo"?"Lô":"Đề";
+    const title=entryTypeLabel(type);
     const groupTurns=rows.reduce((sum,row)=>sum+row.numbers.length,0);
     const groupCost=rows.reduce((sum,row)=>sum+quickEntryCost(row.type,row.numbers,row.points),0);
     return `<div class="quick-draft-column ${type}">
@@ -775,8 +810,8 @@ function renderQuickEntryPreview(){
         <thead><tr><th>Dự đoán</th><th>Điểm/số</th><th>Trừ tiền</th></tr></thead>
         <tbody>${rows.map((row,index)=>`
           <tr data-quick-row data-type="${row.type}" data-numbers="${esc(row.numbers.join("-"))}" data-group-label="${esc(row.groupLabel||"")}">
-            <td><strong>${row.numbers.join(" - ")} <span data-quick-row-points-label>${row.points}${row.type==="lo"?"đ":"k"}</span></strong><small>${esc(row.groupLabel||row.line)}</small></td>
-            <td><input type="number" min="0" step="${row.type==="de"?10:1}" value="${row.points}" data-quick-points-input aria-label="Điểm ${title} dòng ${index+1}"></td>
+            <td><strong>${row.numbers.join(" - ")} <span data-quick-row-points-label>${row.points}${entryTypeSuffix(row.type)}</span></strong><small>${esc(row.groupLabel||row.line)}</small></td>
+            <td><input type="number" min="0" step="${row.type==="lo"?1:10}" value="${row.points}" data-quick-points-input aria-label="Điểm ${title} dòng ${index+1}"></td>
             <td><span data-quick-row-cost>${quickEntryCost(row.type,row.numbers,row.points)}</span></td>
           </tr>`).join("")}</tbody>
       </table>`:`<p class="muted">Chưa có dòng ${title.toLowerCase()}.</p>`}
@@ -787,6 +822,7 @@ function renderQuickEntryPreview(){
       <div><span>Lượt</span><strong data-quick-turns>${totalTurns}</strong></div>
       <div><span>Lô</span><strong data-quick-type-cost="lo">-${groupTotals.lo.cost}</strong></div>
       <div><span>Đề</span><strong data-quick-type-cost="de">-${groupTotals.de.cost}</strong></div>
+      <div><span>3 càng</span><strong data-quick-type-cost="cang3">-${groupTotals.cang3.cost}</strong></div>
       <div class="quick-total-money"><span>Tổng tiền trừ</span><strong><b data-quick-cost>${totalCost}</b>k</strong></div>
     </div>
     <div class="quick-draft-area">
@@ -795,7 +831,7 @@ function renderQuickEntryPreview(){
         <button id="quickEntryBtn" type="button">Ghi nhanh</button>
       </div>
       <div class="quick-copy-preview" data-quick-copy-preview></div>
-      <div class="quick-draft-columns">${renderGroup("lo")}${renderGroup("de")}</div>
+      <div class="quick-draft-columns">${ENTRY_TYPES.map(renderGroup).join("")}</div>
     </div>
   </div>
   ${draft.failed.length?`<p class="quick-failed">Chưa đọc được: ${draft.failed.map(esc).join("; ")}</p>`:""}`;
@@ -807,7 +843,7 @@ function updateQuickEntryTotals(){
   const rows=[...document.querySelectorAll("#quickEntryPreview [data-quick-row]")];
   if(!rows.length)return;
   let totalTurns=0,totalPoints=0,totalCost=0;
-  const groups={lo:{turns:0,cost:0},de:{turns:0,cost:0}};
+  const groups={lo:{turns:0,cost:0},de:{turns:0,cost:0},cang3:{turns:0,cost:0}};
   rows.forEach(row=>{
     const numbers=String(row.dataset.numbers||"").split("-").filter(Boolean);
     const points=Math.max(0,Number(row.querySelector("[data-quick-points-input]")?.value)||0);
@@ -822,7 +858,7 @@ function updateQuickEntryTotals(){
     const costNode=row.querySelector("[data-quick-row-cost]");
     if(costNode)costNode.textContent=String(cost);
     const pointsLabel=row.querySelector("[data-quick-row-points-label]");
-    if(pointsLabel)pointsLabel.textContent=`${points}${row.dataset.type==="lo"?"đ":"k"}`;
+    if(pointsLabel)pointsLabel.textContent=`${points}${entryTypeSuffix(row.dataset.type)}`;
   });
   const turnsNode=document.querySelector("#quickEntryPreview [data-quick-turns]");
   const pointsNode=document.querySelector("#quickEntryPreview [data-quick-points]");
@@ -866,7 +902,7 @@ function quickSavedBatches(entries){
   return [...grouped.values()].sort((a,b)=>(a.createdAt||a.firstIndex)-(b.createdAt||b.firstIndex));
 }
 function quickSavedBatchSummary(entries){
-  let totalPoints=0,loHits=0,deHits=0,cost=0,reward=0,pending=0;
+  let totalPoints=0,loHits=0,deHits=0,cang3Hits=0,cost=0,reward=0,pending=0;
   entries.forEach(entry=>{
     const c=calc(entry);
     totalPoints+=entry.points;
@@ -875,10 +911,11 @@ function quickSavedBatchSummary(entries){
     else{
       reward+=c.reward;
       if(entry.type==="lo")loHits+=c.hits;
+      else if(entry.type==="cang3")cang3Hits+=c.hits;
       else deHits+=c.hits;
     }
   });
-  return {totalPoints,loHits,deHits,cost,reward,pending,net:reward-cost};
+  return {totalPoints,loHits,deHits,cang3Hits,cost,reward,pending,net:reward-cost};
 }
 function renderQuickEntrySaved(){
   const target=$("#quickEntrySaved");
@@ -891,7 +928,7 @@ function renderQuickEntrySaved(){
   const memberId=isAdmin?$("#entryMember")?.value:currentPlayerId;
   const entries=visibleEntries(state.entries)
     .filter(entry=>entry.date===date&&(!memberId||entry.memberId===memberId))
-    .sort((a,b)=>(a.type==="lo"?0:1)-(b.type==="lo"?0:1)||b.points-a.points||a.number.localeCompare(b.number));
+    .sort((a,b)=>entryTypeOrder(a.type)-entryTypeOrder(b.type)||b.points-a.points||a.number.localeCompare(b.number));
   if(!entries.length){
     target.innerHTML=`<div class="quick-saved-empty">Chưa có dữ liệu ghi cho ${displayDate(date)}.</div>`;
     return;
@@ -899,12 +936,12 @@ function renderQuickEntrySaved(){
   const batches=quickSavedBatches(entries);
   target.innerHTML=`<div class="quick-saved-head">
     <strong>Đã ghi ${displayDate(date)}</strong>
-    <span>${batches.length} lần ghi · bấm vào từng dòng để xem cụ thể số điểm lô và đề</span>
+    <span>${batches.length} lần ghi · bấm vào từng dòng để xem cụ thể số điểm lô, đề và 3 càng</span>
   </div>
   <div class="table-wrap quick-saved-summary">
     <table>
       <thead><tr>
-        <th>Lần</th><th>Ngày</th><th>Tổng số đánh</th><th>Tổng điểm dự đoán</th><th>Số lô đúng</th><th>Số đề đúng</th><th>Điểm trừ</th><th>Điểm cộng</th><th>Chênh lệch</th>
+        <th>Lần</th><th>Ngày</th><th>Tổng số đánh</th><th>Tổng điểm dự đoán</th><th>Số lô đúng</th><th>Số đề đúng</th><th>3 càng đúng</th><th>Điểm trừ</th><th>Điểm cộng</th><th>Chênh lệch</th>
       </tr></thead>
       <tbody>
         ${batches.map((batch,index)=>{
@@ -917,12 +954,13 @@ function renderQuickEntrySaved(){
             <td>${total.totalPoints}</td>
             <td>${total.loHits}</td>
             <td>${total.deHits}</td>
+            <td>${total.cang3Hits}</td>
             <td>${total.cost}</td>
             <td>${total.pending?"-":total.reward}</td>
             <td><span class="${total.pending?'pending':total.net>=0?'positive':'negative'}">${total.pending?"Chờ KQ":`${total.net>=0?'+':''}${total.net}`}</span></td>
           </tr>
           <tr id="${detailId}" class="detail-row">
-            <td colspan="9">${renderEntryDetails(batch.entries)}</td>
+            <td colspan="10">${renderEntryDetails(batch.entries)}</td>
           </tr>`;
         }).join("")}
       </tbody>
@@ -1581,6 +1619,7 @@ $("#clearFilter").addEventListener("click",()=>{$("#filterDate").value="";render
 $("#reportDate").addEventListener("change",render);
 $("#clearReportDate").addEventListener("click",()=>{$("#reportDate").value=latestEntryDate(visibleEntries(state.entries));render()});
 $("#resultStatsRange").addEventListener("change",renderResultStats);
+$("#resultBoardRange")?.addEventListener("change",()=>renderResultPreview(null,true));
 $("#homeBtn")?.addEventListener("click",()=>{
   $$(".tab").forEach(btn=>btn.classList.toggle("active",btn.dataset.tab==="predict"));
   $$(".tab-panel").forEach(panel=>panel.classList.toggle("active",panel.id==="tab-predict"));
@@ -1636,11 +1675,29 @@ $("#lawBacktestMonth").addEventListener("change",()=>{
 });
 $("#referenceMode").addEventListener("change",()=>{
   localStorage.setItem(REFERENCE_MODE_KEY,$("#referenceMode").value);
+  if($("#dbBridgeReferenceMode"))$("#dbBridgeReferenceMode").value=$("#referenceMode").value;
   deferRender(renderForecastStats,"#forecastStats");
+  if($(".tab.active")?.dataset.tab==="dbbridge")deferRender(renderDbBridgeStats,"#dbBridgeStats");
 });
 $("#referenceBacktestMonth").addEventListener("change",()=>{
   localStorage.setItem(REFERENCE_MONTH_KEY,$("#referenceBacktestMonth").value);
+  if($("#dbBridgeBacktestMonth"))$("#dbBridgeBacktestMonth").value=$("#referenceBacktestMonth").value;
   deferRender(renderForecastStats,"#forecastStats");
+  if($(".tab.active")?.dataset.tab==="dbbridge")deferRender(renderDbBridgeStats,"#dbBridgeStats");
+});
+$("#dbBridgeReferenceMode")?.addEventListener("change",()=>{
+  localStorage.setItem(REFERENCE_MODE_KEY,$("#dbBridgeReferenceMode").value);
+  if($("#referenceMode"))$("#referenceMode").value=$("#dbBridgeReferenceMode").value;
+  deferRender(renderDbBridgeStats,"#dbBridgeStats");
+});
+$("#dbBridgeBacktestMonth")?.addEventListener("change",()=>{
+  localStorage.setItem(REFERENCE_MONTH_KEY,$("#dbBridgeBacktestMonth").value);
+  if($("#referenceBacktestMonth"))$("#referenceBacktestMonth").value=$("#dbBridgeBacktestMonth").value;
+  deferRender(renderDbBridgeStats,"#dbBridgeStats");
+});
+$("#dbBridgeCang3Years")?.addEventListener("change",()=>{
+  localStorage.setItem(DBBRIDGE_CANG3_YEARS_KEY,$("#dbBridgeCang3Years").value);
+  deferRender(renderDbBridgeStats,"#dbBridgeStats");
 });
 $("#resultSelect").addEventListener("change",()=>{
   renderResultPreview(null,true);
@@ -1790,6 +1847,13 @@ function calc(entry){
     const reward=hits*entry.points*80;
     return {hits,cost,reward,net:reward-cost,matches};
   }
+  if(entry.type==="cang3"){
+    const cost=entry.points;
+    if(!r)return {hits:null,cost,reward:null,net:null,matches:[]};
+    const hit=three(r.special)===three(entry.number)?1:0;
+    const reward=hit*entry.points*400;
+    return {hits:hit,cost,reward,net:reward-cost,matches:hit?[r.special]:[]};
+  }
   const cost=entry.points;
   if(!r)return {hits:null,cost,reward:null,net:null,matches:[]};
   const hit=two(r.special)===entry.number?1:0;
@@ -1799,7 +1863,7 @@ function calc(entry){
 
 function hitLabel(entry,calcResult){
   if(calcResult.hits===null)return "-";
-  if(entry.type==="de")return calcResult.hits?"Trúng":"Trượt";
+  if(entry.type==="de"||entry.type==="cang3")return calcResult.hits?"Trúng":"Trượt";
   if(calcResult.hits)return `${calcResult.hits} lần · <span class="hit-number">${esc(entry.number)}</span> (${calcResult.matches.map(esc).join(", ")})`;
   return `0 lần - không thấy ${entry.number}`;
 }
@@ -2141,54 +2205,64 @@ function renderLongTermDoubleBridge(targetSelector="#longTermDoubleBridge",selec
       <td>${row.status==="miss"||row.status==="hit"?`<strong class="${row.net>=0?'positive':'negative'}">${row.net>=0?'+':''}${row.net}</strong>`:"-"}</td>
     </tr>`).join("")}</tbody>
   </table></div>
-  <div class="bridge-period-heading">
-    <strong>Thống kê điểm theo kỳ</strong>
-    <div class="bridge-period-controls"><label>Hiển thị
-        <select onchange="setDoubleBridgeStatsRange(this.value)">
-          <option value="month" ${statsRange==="month"?'selected':''}>Theo tháng</option>
-          <option value="quarter" ${statsRange==="quarter"?'selected':''}>Theo quý</option>
-          <option value="year" ${statsRange==="year"?'selected':''}>Theo năm</option>
-        </select>
-      </label>
-      <label>Chọn kỳ${statsPeriodControl}</label>
+  <details class="bridge-period-details">
+    <summary>
+      <strong>Thống kê điểm theo kỳ</strong>
+      <span>${displayDate(statsStart)} – ${displayDate(statsEnd)} · ${periodPlans.length} tuần · ${periodTotal.net>=0?'+':''}${periodTotal.net}</span>
+    </summary>
+    <div class="bridge-period-heading">
+      <div></div>
+      <div class="bridge-period-controls"><label>Hiển thị
+          <select onchange="setDoubleBridgeStatsRange(this.value)">
+            <option value="month" ${statsRange==="month"?'selected':''}>Theo tháng</option>
+            <option value="quarter" ${statsRange==="quarter"?'selected':''}>Theo quý</option>
+            <option value="year" ${statsRange==="year"?'selected':''}>Theo năm</option>
+          </select>
+        </label>
+        <label>Chọn kỳ${statsPeriodControl}</label>
+      </div>
     </div>
-  </div>
-  <div class="table-wrap bridge-period-stats"><table>
-    <thead><tr><th>Kỳ thống kê</th><th>Số tuần</th><th>Điểm trừ</th><th>Điểm cộng</th><th>Chênh lệch</th></tr></thead>
-    <tbody><tr class="period-total-row">
-      <td><strong>${displayDate(statsStart)} – ${displayDate(statsEnd)}</strong></td><td>${periodPlans.length}</td>
-      <td class="negative">-${periodTotal.cost}</td><td class="positive">+${periodTotal.reward}</td>
-      <td><strong class="${periodTotal.net>=0?'positive':'negative'}">${periodTotal.net>=0?'+':''}${periodTotal.net}</strong></td>
-    </tr>
-    ${periodPlans.map(item=>`<tr>
-      <td><strong>Tuần ${displayDate(addDate(item.source.date,1))}</strong><small>${item.plan.pairs.join(" - ")}</small></td><td>1</td>
-      <td class="negative">-${item.plan.totalCost}</td><td class="positive">+${item.plan.totalReward}</td>
-      <td><strong class="${item.plan.net>=0?'positive':'negative'}">${item.plan.net>=0?'+':''}${item.plan.net}</strong></td>
-    </tr>`).join("")}</tbody>
-  </table></div>
-  <div class="bridge-backtest-head hidden-bridge-extra">
-    <strong>Backtest chiến thuật 3 điểm trên các tuần quá khứ</strong>
-    <span>Sau cặp đầu: ${remainingStake?`${remainingStake} điểm gốc · ${progression==="double"?"gấp thếp ×2":progression==="increase"?"tăng đều":"giữ nguyên"}`:"dừng luôn"}</span>
-  </div>
-  ${historicalFixedPlans.length?`<div class="bridge-history-summary">
-    <div><span>Số tuần đủ dữ liệu</span><strong>${historicalFixedPlans.length}</strong></div>
-    <div><span>Tuần dương</span><strong class="positive">${historicalTotals.positive} · ${percent(historicalTotals.positive,historicalFixedPlans.length)}</strong></div>
-    <div><span>Tuần âm</span><strong class="negative">${historicalTotals.negative} · ${percent(historicalTotals.negative,historicalFixedPlans.length)}</strong></div>
-    <div><span>Về ít nhất 1 cặp</span><strong>${historicalTotals.first} · ${percent(historicalTotals.first,historicalFixedPlans.length)}</strong></div>
-    <div><span>Về đủ 2 cặp</span><strong>${historicalTotals.both} · ${percent(historicalTotals.both,historicalFixedPlans.length)}</strong></div>
-    <div><span>Tổng chênh lệch</span><strong class="${historicalTotals.net>=0?'positive':'negative'}">${historicalTotals.net>=0?'+':''}${historicalTotals.net}</strong></div>
-    <div><span>ROI</span><strong class="${historicalTotals.net>=0?'positive':'negative'}">${historicalTotals.cost?`${historicalTotals.net>=0?'+':''}${Math.round(historicalTotals.net/historicalTotals.cost*100)}%`:"-"}</strong></div>
-  </div>
-  <div class="table-wrap bridge-history-plan"><table>
-    <thead><tr><th>Tuần áp dụng</th><th>Hai cặp kép</th><th>Đã về</th><th>Điểm trừ</th><th>Điểm cộng</th><th>Chênh lệch</th></tr></thead>
-    <tbody>${historicalFixedPlans.map(item=>`<tr class="${item.plan.net>=0?'history-positive':'history-negative'}">
-      <td><strong>${displayDate(item.start)} – ${displayDate(item.end)}</strong><small>Chốt từ ${displayDate(item.source.date)}</small></td>
-      <td>${item.plan.pairs.join(" - ")}</td>
-      <td>${item.plan.completedPairs.length}/${item.plan.pairs.length}${item.plan.completedPairs.length?` · ${item.plan.completedPairs.join(" - ")}`:""}</td>
-      <td class="negative">-${item.plan.totalCost}</td><td class="positive">+${item.plan.totalReward}</td>
-      <td><strong class="${item.plan.net>=0?'positive':'negative'}">${item.plan.net>=0?'+':''}${item.plan.net}</strong></td>
-    </tr>`).join("")}</tbody>
-  </table></div>`:'<p class="muted hidden-bridge-extra">Chưa có tuần quá khứ nào đủ cả 8 ngày kết quả để backtest.</p>'}
+    <div class="table-wrap bridge-period-stats"><table>
+      <thead><tr><th>Kỳ thống kê</th><th>Số tuần</th><th>Điểm trừ</th><th>Điểm cộng</th><th>Chênh lệch</th></tr></thead>
+      <tbody><tr class="period-total-row">
+        <td><strong>${displayDate(statsStart)} – ${displayDate(statsEnd)}</strong></td><td>${periodPlans.length}</td>
+        <td class="negative">-${periodTotal.cost}</td><td class="positive">+${periodTotal.reward}</td>
+        <td><strong class="${periodTotal.net>=0?'positive':'negative'}">${periodTotal.net>=0?'+':''}${periodTotal.net}</strong></td>
+      </tr>
+      ${periodPlans.map(item=>`<tr>
+        <td><strong>Tuần ${displayDate(addDate(item.source.date,1))}</strong><small>${item.plan.pairs.join(" - ")}</small></td><td>1</td>
+        <td class="negative">-${item.plan.totalCost}</td><td class="positive">+${item.plan.totalReward}</td>
+        <td><strong class="${item.plan.net>=0?'positive':'negative'}">${item.plan.net>=0?'+':''}${item.plan.net}</strong></td>
+      </tr>`).join("")}</tbody>
+    </table></div>
+  </details>
+  <details class="bridge-backtest-details">
+    <summary>
+      <strong>Backtest chiến thuật 3 điểm trên các tuần quá khứ</strong>
+      <span>${historicalFixedPlans.length} tuần · ${historicalTotals.net>=0?'+':''}${historicalTotals.net} · sau cặp đầu: ${remainingStake?`${remainingStake}đ ${progression==="double"?"×2":progression==="increase"?"+đều":"giữ"}`:"dừng"}</span>
+    </summary>
+    <div class="bridge-backtest-detail-body">
+      ${historicalFixedPlans.length?`<div class="bridge-history-summary">
+        <div><span>Số tuần đủ dữ liệu</span><strong>${historicalFixedPlans.length}</strong></div>
+        <div><span>Tuần dương</span><strong class="positive">${historicalTotals.positive} · ${percent(historicalTotals.positive,historicalFixedPlans.length)}</strong></div>
+        <div><span>Tuần âm</span><strong class="negative">${historicalTotals.negative} · ${percent(historicalTotals.negative,historicalFixedPlans.length)}</strong></div>
+        <div><span>Về ít nhất 1 cặp</span><strong>${historicalTotals.first} · ${percent(historicalTotals.first,historicalFixedPlans.length)}</strong></div>
+        <div><span>Về đủ 2 cặp</span><strong>${historicalTotals.both} · ${percent(historicalTotals.both,historicalFixedPlans.length)}</strong></div>
+        <div><span>Tổng chênh lệch</span><strong class="${historicalTotals.net>=0?'positive':'negative'}">${historicalTotals.net>=0?'+':''}${historicalTotals.net}</strong></div>
+        <div><span>ROI</span><strong class="${historicalTotals.net>=0?'positive':'negative'}">${historicalTotals.cost?`${historicalTotals.net>=0?'+':''}${Math.round(historicalTotals.net/historicalTotals.cost*100)}%`:"-"}</strong></div>
+      </div>
+      <div class="table-wrap bridge-history-plan"><table>
+        <thead><tr><th>Tuần áp dụng</th><th>Hai cặp kép</th><th>Đã về</th><th>Điểm trừ</th><th>Điểm cộng</th><th>Chênh lệch</th></tr></thead>
+        <tbody>${historicalFixedPlans.map(item=>`<tr class="${item.plan.net>=0?'history-positive':'history-negative'}">
+          <td><strong>${displayDate(item.start)} – ${displayDate(item.end)}</strong><small>Chốt từ ${displayDate(item.source.date)}</small></td>
+          <td>${item.plan.pairs.join(" - ")}</td>
+          <td>${item.plan.completedPairs.length}/${item.plan.pairs.length}${item.plan.completedPairs.length?` · ${item.plan.completedPairs.join(" - ")}`:""}</td>
+          <td class="negative">-${item.plan.totalCost}</td><td class="positive">+${item.plan.totalReward}</td>
+          <td><strong class="${item.plan.net>=0?'positive':'negative'}">${item.plan.net>=0?'+':''}${item.plan.net}</strong></td>
+        </tr>`).join("")}</tbody>
+      </table></div>`:'<p class="muted">Chưa có tuần quá khứ nào đủ cả 8 ngày kết quả để backtest.</p>'}
+    </div>
+  </details>
   <div class="bridge-backtest-head hidden-bridge-extra">
     <strong>Phân bổ điểm dự đoán không âm khi 1 cặp về</strong>
     <span>Hai cặp đánh cùng điểm · dừng ngay sau khi đã về</span>
@@ -2225,7 +2299,7 @@ function renderEntries(){
   const filter=$("#filterDate").value;
   const entries=visibleEntries([...state.entries]).filter(x=>!filter||x.date===filter).sort((a,b)=>b.date.localeCompare(a.date));
   if(!entries.length){
-    $("#summaryBody").innerHTML=`<tr><td colspan="9" class="muted">${canUsePlayerData()?"Chưa có lượt nào.":"Đăng nhập người chơi để xem dữ liệu của bạn."}</td></tr>`;
+    $("#summaryBody").innerHTML=`<tr><td colspan="10" class="muted">${canUsePlayerData()?"Chưa có lượt nào.":"Đăng nhập người chơi để xem dữ liệu của bạn."}</td></tr>`;
     return;
   }
   const grouped=new Map();
@@ -2234,7 +2308,7 @@ function renderEntries(){
     grouped.get(entry.date).push(entry);
   });
   $("#summaryBody").innerHTML=[...grouped.entries()].map(([date,dayEntries])=>{
-    let totalPoints=0,loHits=0,deHits=0,cost=0,reward=0,pending=0;
+    let totalPoints=0,loHits=0,deHits=0,cang3Hits=0,cost=0,reward=0,pending=0;
     dayEntries.forEach(entry=>{
       const c=calc(entry);
       totalPoints+=entry.points;
@@ -2243,6 +2317,7 @@ function renderEntries(){
       else {
         reward+=c.reward;
         if(entry.type==="lo") loHits+=c.hits;
+        else if(entry.type==="cang3") cang3Hits+=c.hits;
         else deHits+=c.hits;
       }
     });
@@ -2255,13 +2330,14 @@ function renderEntries(){
         <td>${totalPoints}</td>
         <td>${loHits}</td>
         <td>${deHits}</td>
+        <td>${cang3Hits}</td>
         <td>${cost}</td>
         <td>${reward}</td>
         <td><span class="${net>=0?'positive':'negative'}">${net>=0?'+':''}${net}</span></td>
         <td><button class="danger" type="button" onclick="event.stopPropagation();removeEntriesByDate('${date}')">Xóa</button></td>
       </tr>
       <tr id="${detailId}" class="detail-row">
-        <td colspan="9">${renderEntryDetails(dayEntries)}</td>
+        <td colspan="10">${renderEntryDetails(dayEntries)}</td>
       </tr>`;
   }).join("");
 }
@@ -2279,7 +2355,7 @@ function renderEntryDetails(entries){
           `<span class="${c.net>=0?'positive':'negative'}">${c.net>=0?'+':''}${c.net}</span>`;
         return `<tr>
           <td>${esc(memberName(e.memberId))}</td>
-          <td>${e.type==="lo"?"Lô":"Đề"}</td>
+          <td>${entryTypeLabel(e.type)}</td>
           <td><strong>${e.number}</strong></td>
           <td>${e.points}</td>
         <td>${hitLabel(e,c)}</td>
@@ -2301,7 +2377,7 @@ function buildEntryDetailRows(entries){
     grouped.get(key).push(entry);
   });
   return [...grouped.values()]
-    .sort((a,b)=>(a[0].type==="lo"?0:1)-(b[0].type==="lo"?0:1)||b[0].points-a[0].points)
+    .sort((a,b)=>entryTypeOrder(a[0].type)-entryTypeOrder(b[0].type)||b[0].points-a[0].points)
     .map(group=>({kind:group.length>1?"group":"single",entries:group}));
 }
 
@@ -2324,14 +2400,14 @@ function renderGroupedEntryDetail(entries){
     `<span class="${net>=0?'positive':'negative'}">${net>=0?'+':''}${net}</span>`;
   const highlightedMatches=entries.filter(entry=>calc(entry).hits>0)
     .map(entry=>`<span class="hit-number">${esc(entry.number)}</span>`).join(", ");
-  const hitText=pending?"-":first.type==="de"?
+  const hitText=pending?"-":first.type==="de"||first.type==="cang3"?
     `${hits} con trúng${matches.length?` (${matches.map(esc).join(", ")})`:""}`:
     `${hits} lần${highlightedMatches?` · ${highlightedMatches}`:""}${matches.length?` (${matches.map(esc).join(", ")})`:""}`;
   const ids=entries.map(e=>e.id).join(",");
   const numbers=groupNumbersLabel(entries);
   return `<tr>
     <td>${esc(memberName(first.memberId))}</td>
-    <td>${first.type==="lo"?"Lô":"Đề"}</td>
+    <td>${entryTypeLabel(first.type)}</td>
     <td><strong>${esc(numbers)}</strong></td>
     <td>${first.points} / số</td>
     <td>${hitText}</td>
@@ -2344,6 +2420,7 @@ function renderGroupedEntryDetail(entries){
 
 function groupNumbersLabel(entries){
   const numbers=[...new Set(entries.map(e=>e.number))].sort();
+  if(entries[0]?.type==="cang3")return numbers.join("-");
   const heads=[...new Set(numbers.map(n=>n[0]))];
   const labels=heads.map(head=>{
     const full=Array.from({length:10},(_,tail)=>`${head}${tail}`);
@@ -2369,7 +2446,8 @@ function renderResultPreview(tempImage,preserveSelection=false){
   $("#resultPreview").innerHTML=chosen?`
     <p><strong>${displayDate(chosen.date)}</strong> · ${chosen.prizes.length} giải đã nhập</p>
     ${renderPrizeTable(chosen)}
-    <p class="saved-loto"><strong>Lô tô đã lưu:</strong> ${lotoNumbers(chosen).map(n=>`<span>${n}</span>`).join("")}</p>`:
+    <p class="saved-loto"><strong>Lô tô đã lưu:</strong> ${lotoNumbers(chosen).map(n=>`<span>${n}</span>`).join("")}</p>
+    ${renderResultBoard()}`:
     '<p class="muted">Chưa có kết quả.</p>';
 }
 
@@ -2392,7 +2470,7 @@ function renderPrizeTable(result){
     return rows.map((row,index)=>`
       <tr class="${start===0?"special-row":""}">
         ${index===0?`<th rowspan="${rows.length}">${label}</th>`:""}
-        <td colspan="${Math.max(1,12/cols)}">${row.map(n=>`<span class="prize-number">${esc(n)}</span>`).join("")}</td>
+        <td colspan="${Math.max(1,12/cols)}"><div class="prize-line">${row.map(n=>`<span class="prize-number">${esc(n)}</span>`).join("")}</div></td>
       </tr>`).join("");
   }).join("")}</tbody></table>`;
 }
@@ -2424,6 +2502,7 @@ function renderModalHeadTable(result){
   const special=two(result.special);
   const byHead=Array.from({length:10},()=>[]);
   lotoNumbers(result).forEach(number=>byHead[Number(number[0])].push(number));
+  byHead.forEach(numbers=>numbers.sort((a,b)=>Number(a)-Number(b)||a.localeCompare(b)));
   return `<table class="loto-table modal-loto-table">
     <thead><tr><th colspan="2">Đầu lô</th></tr></thead>
     <tbody>${byHead.map((numbers,index)=>`
@@ -2443,11 +2522,10 @@ function renderHeadStats(){
   const special=two(result.special);
   const nums=lotoNumbers(result);
   const byHead=Array.from({length:10},()=>[]);
-  const byTail=Array.from({length:10},()=>[]);
   nums.forEach(number=>{
     byHead[Number(number[0])].push(number);
-    byTail[Number(number[1])].push(number);
   });
+  byHead.forEach(numbers=>numbers.sort((a,b)=>Number(a)-Number(b)||a.localeCompare(b)));
   const renderRows=groups=>groups.map((numbers,index)=>`
     <tr>
       <th>${index}</th>
@@ -2456,7 +2534,6 @@ function renderHeadStats(){
   $("#headStats").innerHTML=`
     <div class="loto-stats">
       <table class="loto-table"><thead><tr><th colspan="2">Đầu Lô tô</th></tr></thead><tbody>${renderRows(byHead)}</tbody></table>
-      <table class="loto-table"><thead><tr><th colspan="2">Đuôi Lô tô</th></tr></thead><tbody>${renderRows(byTail)}</tbody></table>
     </div>`;
 }
 
@@ -2488,6 +2565,28 @@ function renderResultStats(){
         </div>`;
       }).join(""):'<p class="muted">Chưa có kết quả đã lưu.</p>'}
     </div>`;
+}
+
+function renderResultBoard(){
+  const limit=Number($("#resultBoardRange")?.value)||7;
+  const selectedDate=$("#resultSelect")?.value||"";
+  const results=stateCache.resultsDesc.filter(result=>result.date!==selectedDate).slice(0,limit);
+  if(!results.length)return "";
+  return `<div class="result-board">
+    <div class="result-board-head">
+      <strong>Bảng kết quả ${results.length} ngày</strong>
+      <span>Hiển thị dạng bảng ngày để so sánh cầu mới</span>
+    </div>
+    <div class="result-board-days">
+      ${results.map(result=>`<article class="result-board-day">
+        <p><strong>${displayDate(result.date)}</strong> · ${result.prizes.length} giải đã nhập</p>
+        <div class="result-board-layout">
+          <div>${renderPrizeTable(result)}</div>
+          <div>${renderModalHeadTable(result)}</div>
+        </div>
+      </article>`).join("")}
+    </div>
+  </div>`;
 }
 
 function filterResultStatDates(dates){
@@ -2646,6 +2745,18 @@ function renderDbBridgeStats(){
   const hitRate=analysis.rows.length?Math.round(analysis.hitDays/analysis.rows.length*100):0;
   const copyText=analysis.prediction.map(row=>`lô ${row.number}`).join(" ");
   const forecastResult=resultForDate(analysis.forecastDate);
+  const mode=$("#dbBridgeReferenceMode")?.value||localStorage.getItem(REFERENCE_MODE_KEY)||"fun";
+  const backtestMonth=$("#dbBridgeBacktestMonth")?.value||localStorage.getItem(REFERENCE_MONTH_KEY)||today().slice(0,7);
+  const cang3Years=Number($("#dbBridgeCang3Years")?.value||localStorage.getItem(DBBRIDGE_CANG3_YEARS_KEY)||3);
+  const results=stateCache.results.filter(result=>result?.special&&(result.prizes||[]).length);
+  const byDate=new Map(results.map(result=>[result.date,result]));
+  const autoRows=buildAutoRowsForBase(analysis.baseResult,results,byDate);
+  const allocation=buildReferenceAllocation(autoRows,mode);
+  allocation.forecastDate=analysis.forecastDate;
+  allocation.performance=forecastResult?evaluateReferencePerformance(allocation,forecastResult):null;
+  allocation.monthly=buildReferenceMonthBacktest(backtestMonth,results,byDate,mode);
+  allocation.signal=referenceSignal(allocation);
+  const cang3Review=buildCang3PrizeBridgeReview(analysis.baseDate,cang3Years);
   target.innerHTML=`
     <div class="stat-grid db-bridge-summary">
       <div class="stat-card">Khoảng soi<strong>${displayDate(analysis.start)} - ${displayDate(analysis.end)}</strong><small>3 tháng gần nhất theo ngày soi</small></div>
@@ -2658,6 +2769,9 @@ function renderDbBridgeStats(){
       <div class="reference-numbers">${analysis.prediction.map(row=>`<span>${row.number}<small>${Math.round(row.rate*100)}%</small></span>`).join("")}</div>
       ${copyText?`<small>${esc(copyText)}</small><button class="secondary" type="button" data-text="${esc(copyText)}" onclick="copyReferenceText(this.dataset.text)">Copy dãy lô</button>`:""}
     </div>
+    ${renderReferenceNumbers(allocation.lo,allocation.de,allocation.cang3||[],allocation)}
+    ${renderCang3PrizeBridgeReview(cang3Review)}
+    ${renderDbBridgeStakePlan(analysis,5)}
     <div class="pattern-grid db-bridge-grid">
       <div>
         <h3>Tỷ lệ từng cầu</h3>
@@ -2668,6 +2782,76 @@ function renderDbBridgeStats(){
         ${renderDbBridgeHistoryTable(analysis.rows.slice(0,30))}
       </div>
     </div>`;
+}
+
+function buildDbBridgeStakePlan(analysis,stake=5){
+  const currentNumbers=[...new Set((analysis.prediction||[]).map(row=>row.number))];
+  const currentCost=currentNumbers.length*stake*23;
+  const history=(analysis.rows||[]).map(row=>{
+    const picks=[...new Set((row.checked||[]).map(rule=>rule.number))];
+    const hitCounts=picks.map(number=>({number,hits:(row.nextLoto||[]).filter(loto=>loto===number).length})).filter(item=>item.hits);
+    const hitNumbers=hitCounts.map(item=>item.number);
+    const hits=hitCounts.reduce((sum,item)=>sum+item.hits,0);
+    const cost=picks.length*stake*23;
+    const reward=hits*stake*80;
+    return {
+      ...row,
+      picks,
+      hitCounts,
+      hitNumbers,
+      hits,
+      cost,
+      reward,
+      net:reward-cost
+    };
+  });
+  const totals=history.reduce((sum,row)=>{
+    sum.days++;
+    sum.pickTurns+=row.picks.length;
+    sum.hits+=row.hits;
+    sum.cost+=row.cost;
+    sum.reward+=row.reward;
+    sum.net+=row.net;
+    if(row.hits)sum.hitDays++;
+    return sum;
+  },{days:0,pickTurns:0,hits:0,hitDays:0,cost:0,reward:0,net:0});
+  return {stake,currentNumbers,currentCost,history,totals};
+}
+
+function renderDbBridgeStakePlan(analysis,stake=5){
+  const plan=buildDbBridgeStakePlan(analysis,stake);
+  if(!plan.currentNumbers.length)return "";
+  const roi=plan.totals.cost?Math.round(plan.totals.net/plan.totals.cost*100):0;
+  return `<details class="db-bridge-budget">
+    <summary>
+      <strong>Dự toán đánh mỗi con ${stake} điểm</strong>
+      <span>${plan.currentNumbers.length} số · trừ hôm sau ${plan.currentCost} · quá khứ ${plan.totals.net>=0?'+':''}${plan.totals.net}</span>
+    </summary>
+    <div class="db-bridge-budget-body">
+      <div class="bridge-history-summary db-bridge-budget-summary">
+        <div><span>Dãy hiện tại</span><strong>${plan.currentNumbers.join(" - ")}</strong><small>${stake}đ/con · trừ ${plan.currentCost}</small></div>
+        <div><span>Ngày đã test</span><strong>${plan.totals.days}</strong><small>${plan.totals.hitDays} ngày có ăn lô</small></div>
+        <div><span>Điểm trừ / cộng</span><strong>${plan.totals.cost} / ${plan.totals.reward}</strong><small>${plan.totals.hits} nháy trúng</small></div>
+        <div><span>Chênh lệch</span><strong class="${plan.totals.net>=0?'positive':'negative'}">${plan.totals.net>=0?'+':''}${plan.totals.net}</strong><small>ROI ${plan.totals.net>=0?'+':''}${roi}%</small></div>
+      </div>
+      <div class="db-bridge-allocation-line">
+        ${plan.currentNumbers.map(number=>`<span><strong>${number}</strong> ${stake}đ <small>trừ ${stake*23}</small></span>`).join("")}
+      </div>
+      <div class="table-wrap db-bridge-budget-table"><table>
+        <thead><tr><th>Ngày soi</th><th>Dãy đánh</th><th>Ngày KQ</th><th>Trúng</th><th>Trừ</th><th>Cộng</th><th>+/-</th></tr></thead>
+        <tbody>${plan.history.slice(0,30).map(row=>`
+          <tr class="${row.net>=0?'history-positive':'history-negative'}">
+            <td>${displayDate(row.baseDate)}<br><small>ĐB ${esc(row.baseSpecial)}</small></td>
+            <td>${row.picks.join(" - ")}<br><small>${stake}đ/con</small></td>
+            <td>${displayDate(row.nextDate)}<br><small>ĐB ${esc(row.nextSpecial)}</small></td>
+            <td>${row.hitCounts.length?row.hitCounts.map(item=>`<span class="hit-number">${item.number}</span>${item.hits>1?` <small>x${item.hits}</small>`:""}`).join(" "):"-"}</td>
+            <td>${row.cost}</td>
+            <td>${row.reward}</td>
+            <td><strong class="${row.net>=0?'positive':'negative'}">${row.net>=0?'+':''}${row.net}</strong></td>
+          </tr>`).join("")}</tbody>
+      </table></div>
+    </div>
+  </details>`;
 }
 
 function renderDbBridgeRuleTable(rows){
@@ -2691,6 +2875,206 @@ function renderDbBridgeHistoryTable(rows){
         <td>${displayDate(row.nextDate)}<br><small>ĐB ${esc(row.nextSpecial)}</small></td>
         <td>${row.hitRules.length?row.hitRules.map(rule=>`<span class="hit-number">${rule.number}</span> <small>${esc(rule.label)}</small>`).join("<br>"):"-"}</td>
       </tr>`).join("")}</tbody></table>`;
+}
+
+function prizeSlotLabel(index){
+  const groups=[
+    ["ĐB",0,1],
+    ["G1",1,2],
+    ["G2",2,4],
+    ["G3",4,10],
+    ["G4",10,14],
+    ["G5",14,20],
+    ["G6",20,23],
+    ["G7",23,27]
+  ];
+  const group=groups.find(([,start,end])=>index>=start&&index<end);
+  if(!group)return `Giải ${index+1}`;
+  const [,start,end]=group;
+  return end-start===1?group[0]:`${group[0]}.${index-start+1}`;
+}
+
+function prizeSlots(result){
+  return (result?.prizes||[]).slice(0,27).map((value,index)=>({
+    index,
+    key:`p${index}`,
+    label:prizeSlotLabel(index),
+    value:String(value||"").replace(/\D/g,"")
+  })).filter(slot=>slot.value);
+}
+
+function cang3Parts(slot){
+  const value=slot.value.padStart(5,"0");
+  const first1=value.slice(0,1),first2=value.slice(0,2),first3=value.slice(0,3);
+  const mid3=value.length>=3?value.slice(Math.max(0,Math.floor((value.length-3)/2)),Math.max(0,Math.floor((value.length-3)/2))+3):value;
+  const last1=value.slice(-1),last2=value.slice(-2),last3=value.slice(-3);
+  return {first1,first2,first3:three(first3),mid3:three(mid3),last1,last2,last3:three(last3)};
+}
+
+function cang3PrizeBridgeRules(result){
+  const slots=prizeSlots(result);
+  const rules=[];
+  slots.forEach(slot=>{
+    const p=cang3Parts(slot);
+    [
+      ["last3",`3 cuối ${slot.label}`,p.last3],
+      ["first3",`3 đầu ${slot.label}`,p.first3],
+      ["mid3",`3 giữa ${slot.label}`,p.mid3],
+      ["reverse-last3",`Đảo 3 cuối ${slot.label}`,p.last3.split("").reverse().join("")],
+      ["first2-last1",`2 đầu + đuôi ${slot.label}`,`${p.first2}${p.last1}`],
+      ["first1-last2",`Đầu + 2 đuôi ${slot.label}`,`${p.first1}${p.last2}`]
+    ].forEach(([kind,label,number])=>{
+      rules.push({key:`single|${kind}|${slot.key}`,label,number:three(number),source:`${slot.label} ${slot.value}`});
+    });
+  });
+  slots.forEach(a=>{
+    const ap=cang3Parts(a);
+    slots.forEach(b=>{
+      if(a.index===b.index)return;
+      const bp=cang3Parts(b);
+      [
+        ["a-last2-b-last1",`2 đuôi ${a.label} + đuôi ${b.label}`,`${ap.last2}${bp.last1}`],
+        ["a-first2-b-last1",`2 đầu ${a.label} + đuôi ${b.label}`,`${ap.first2}${bp.last1}`],
+        ["a-last1-b-last2",`Đuôi ${a.label} + 2 đuôi ${b.label}`,`${ap.last1}${bp.last2}`],
+        ["a-first1-b-last2",`Đầu ${a.label} + 2 đuôi ${b.label}`,`${ap.first1}${bp.last2}`],
+        ["a-last2-b-first1",`2 đuôi ${a.label} + đầu ${b.label}`,`${ap.last2}${bp.first1}`]
+      ].forEach(([kind,label,number])=>{
+        rules.push({key:`pair|${kind}|${a.key}|${b.key}`,label,number:three(number),source:`${a.label} ${a.value} / ${b.label} ${b.value}`});
+      });
+    });
+  });
+  return rules;
+}
+
+function buildCang3PrizeBridgeReview(baseDateValue,years=3){
+  const baseDate=baseDateValue&&stateCache.resultsByDate.has(baseDateValue)?baseDateValue:stateCache.resultsDesc.find(r=>r?.special)?.date||"";
+  const baseResult=baseDate?stateCache.resultsByDate.get(baseDate):null;
+  if(!baseResult)return {baseDate:"",baseResult:null,years,rows:[],topRules:[],prediction:[],summary:null};
+  const safeYears=Math.min(3,Math.max(1,Number(years)||3));
+  const start=addDate(baseDate,-365*safeYears);
+  const results=stateCache.results.filter(result=>result?.special&&(result.prizes||[]).length&&result.date>=start&&result.date<baseDate);
+  const byDate=stateCache.resultsByDate;
+  const stats=new Map();
+  const weekdayStats=new Map();
+  const baseWeekday=new Date(`${baseDate}T00:00:00`).getDay();
+  const rows=[];
+  results.forEach(result=>{
+    const next=byDate.get(addDate(result.date,1));
+    if(!next?.special)return;
+    const target=three(next.special);
+    const sameWeekday=new Date(`${result.date}T00:00:00`).getDay()===baseWeekday;
+    const checked=cang3PrizeBridgeRules(result).map(rule=>{
+      const stat=stats.get(rule.key)||{key:rule.key,label:rule.label,total:0,hit:0,lastHitDate:"",examples:[]};
+      const weekdayStat=weekdayStats.get(rule.key)||{total:0,hit:0};
+      const isHit=three(rule.number)===target;
+      stat.total++;
+      if(sameWeekday)weekdayStat.total++;
+      if(isHit){
+        stat.hit++;
+        if(sameWeekday)weekdayStat.hit++;
+        stat.lastHitDate=result.date;
+        if(stat.examples.length<5)stat.examples.push({baseDate:result.date,nextDate:next.date,nextSpecial:next.special,number:rule.number,source:rule.source});
+      }
+      stats.set(rule.key,stat);
+      weekdayStats.set(rule.key,weekdayStat);
+      return {...rule,hit:isHit};
+    });
+    const hitRules=checked.filter(rule=>rule.hit);
+    rows.push({baseDate:result.date,nextDate:next.date,nextSpecial:next.special,target,hitRules});
+  });
+  const currentRules=cang3PrizeBridgeRules(baseResult);
+  const statByKey=stats;
+  const prediction=currentRules.map(rule=>{
+    const stat=statByKey.get(rule.key)||{total:0,hit:0,lastHitDate:"",examples:[]};
+    const weekdayStat=weekdayStats.get(rule.key)||{total:0,hit:0};
+    return {
+      ...rule,
+      total:stat.total,
+      hit:stat.hit,
+      rate:stat.total?stat.hit/stat.total:0,
+      weekdayTotal:weekdayStat.total,
+      weekdayHit:weekdayStat.hit,
+      weekdayRate:weekdayStat.total?weekdayStat.hit/weekdayStat.total:0,
+      lastHitDate:stat.lastHitDate,
+      examples:stat.examples
+    };
+  }).filter(rule=>rule.total>=30&&rule.hit>0)
+    .sort((a,b)=>b.weekdayRate-a.weekdayRate||b.rate-a.rate||b.hit-a.hit||String(b.lastHitDate).localeCompare(String(a.lastHitDate))||a.label.localeCompare(b.label))
+    .slice(0,18);
+  const topRules=[...stats.values()].filter(rule=>rule.total>=30&&rule.hit>0)
+    .map(rule=>({...rule,rate:rule.total?rule.hit/rule.total:0}))
+    .sort((a,b)=>b.rate-a.rate||b.hit-a.hit||String(b.lastHitDate).localeCompare(String(a.lastHitDate))||a.label.localeCompare(b.label))
+    .slice(0,30);
+  return {
+    baseDate,
+    baseResult,
+    forecastDate:addDate(baseDate,1),
+    years:safeYears,
+    start,
+    end:baseDate,
+    rows:rows.sort((a,b)=>b.baseDate.localeCompare(a.baseDate)),
+    topRules,
+    prediction,
+    summary:{
+      days:rows.length,
+      hitDays:rows.filter(row=>row.hitRules.length).length,
+      ruleCount:stats.size
+    }
+  };
+}
+
+function renderCang3PrizeBridgeReview(review){
+  if(!review?.baseResult)return "";
+  const summary=review.summary||{days:0,hitDays:0,ruleCount:0};
+  const copyText=review.prediction.length?referenceCopyText(review.prediction.map(rule=>({number:rule.number,stake:10})),"cang3"):"";
+  return `<div class="reference-box cang3-review">
+    <div class="reference-head">
+      <h3>Rà cầu 3 càng 27 giải</h3>
+      <div class="reference-head-actions"><small>${review.years} năm · ${summary.days} ngày · ${summary.ruleCount} rule đã rà</small>
+        ${copyText?`<button class="secondary" type="button" data-text="${esc(copyText)}" onclick="copyReferenceText(this.dataset.text)">Copy 3 càng</button>`:""}
+      </div>
+    </div>
+    <div class="reference-metrics">
+      <span>Khoảng rà: <strong>${displayDate(review.start)} - ${displayDate(review.end)}</strong></span>
+      <span>Ngày có rule trúng: <strong>${summary.hitDays}/${summary.days}</strong></span>
+      <span>Dự đoán: <strong>${displayDate(review.forecastDate)}</strong></span>
+    </div>
+    <div class="reference-grid cang3-review-grid">
+      <div class="reference-group">
+        <div class="reference-title"><strong>Top cho ngày mới</strong>${copyText?`<button class="secondary" type="button" data-text="${esc(copyText)}" onclick="copyReferenceText(this.dataset.text)">Copy</button>`:""}</div>
+        <div class="reference-numbers cang3">${review.prediction.length?review.prediction.slice(0,12).map(rule=>`<span title="${esc(rule.label)}">${rule.number}<small>${Math.round(rule.rate*1000)/10}%</small></span>`).join(""):'<em>Chưa có rule đủ mẫu cho ngày này</em>'}</div>
+        ${review.prediction.length?`<small>${review.prediction.slice(0,8).map(rule=>`${rule.number}: ${rule.label} (${rule.hit}/${rule.total}${rule.weekdayTotal?`, cùng thứ ${rule.weekdayHit}/${rule.weekdayTotal}`:""})`).map(esc).join("<br>")}</small>`:""}
+      </div>
+      <div class="reference-group">
+        <div class="reference-title"><strong>Rule mạnh quá khứ</strong></div>
+        ${renderCang3RuleTable(review.topRules.slice(0,10))}
+      </div>
+      <div class="reference-group">
+        <div class="reference-title"><strong>Lịch sử gần nhất</strong></div>
+        ${renderCang3HistoryTable(review.rows.slice(0,12))}
+      </div>
+    </div>
+  </div>`;
+}
+
+function renderCang3RuleTable(rules){
+  if(!rules.length)return '<p class="muted">Chưa có rule trúng đủ mẫu.</p>';
+  return `<table class="special-table db-bridge-table cang3-rule-table"><thead><tr><th>Cầu</th><th>Trúng</th><th>Gần nhất</th></tr></thead>
+    <tbody>${rules.map(rule=>`<tr>
+      <td>${esc(rule.label)}</td>
+      <td><strong>${rule.hit}/${rule.total}</strong><br><small>${Math.round(rule.rate*1000)/10}%</small></td>
+      <td>${rule.lastHitDate?displayDate(rule.lastHitDate):"-"}</td>
+    </tr>`).join("")}</tbody></table>`;
+}
+
+function renderCang3HistoryTable(rows){
+  if(!rows.length)return '<p class="muted">Chưa có lịch sử để đối chiếu.</p>';
+  return `<table class="special-table db-bridge-table cang3-history-table"><thead><tr><th>Ngày soi</th><th>3 càng hôm sau</th><th>Rule khớp</th></tr></thead>
+    <tbody>${rows.map(row=>`<tr class="${row.hitRules.length?'history-positive':'history-negative'}">
+      <td>${displayDate(row.baseDate)}<br><small>${displayDate(row.nextDate)}</small></td>
+      <td><strong>${three(row.nextSpecial)}</strong><br><small>ĐB ${esc(row.nextSpecial)}</small></td>
+      <td>${row.hitRules.length?row.hitRules.slice(0,4).map(rule=>`<span class="hit-number">${rule.number}</span> <small>${esc(rule.label)}</small>`).join("<br>"):"-"}</td>
+    </tr>`).join("")}</tbody></table>`;
 }
 
 function renderPatternYearOptions(){
@@ -2770,10 +3154,11 @@ function buildDbBridgeAnalysis(baseDateValue){
     const nextDate=addDate(result.date,1);
     const next=byDate.get(nextDate);
     if(!next)return;
-    const nextLoto=new Set(lotoNumbers(next));
+    const nextLotoList=lotoNumbers(next);
     const checked=dbBridgeRules(result).map(rule=>{
       const stat=ruleStats.get(rule.key)||{...rule,total:0,hit:0,lastHitDate:"",examples:[]};
-      const isHit=nextLoto.has(rule.number);
+      const hitCount=nextLotoList.filter(number=>number===rule.number).length;
+      const isHit=hitCount>0;
       stat.total++;
       if(isHit){
         stat.hit++;
@@ -2781,10 +3166,10 @@ function buildDbBridgeAnalysis(baseDateValue){
         stat.examples.push({baseDate:result.date,nextDate,nextSpecial:next.special,number:rule.number});
       }
       ruleStats.set(rule.key,stat);
-      return {...rule,hit:isHit};
+      return {...rule,hit:isHit,hitCount};
     });
     const hitRules=checked.filter(rule=>rule.hit);
-    rows.push({baseDate:result.date,nextDate,nextSpecial:next.special,baseSpecial:result.special,checked,hitRules});
+    rows.push({baseDate:result.date,nextDate,nextSpecial:next.special,nextLoto:nextLotoList,baseSpecial:result.special,checked,hitRules});
   });
   const currentRules=baseResult?dbBridgeRules(baseResult):[];
   const currentByKey=new Map(currentRules.map(rule=>[rule.key,rule]));
@@ -3015,6 +3400,34 @@ function autoCandidateRules(result){
   return rules.map(rule=>({...rule,numbers:[...new Set(rule.numbers.map(two))]}));
 }
 
+function cang3CandidateRules(result){
+  const special=String(result.special||"").replace(/\D/g,"").padStart(5,"0").slice(-5);
+  if(!special)return [];
+  const digits=special.split("");
+  const last3=three(special);
+  const first3=special.slice(0,3);
+  const mid3=special.slice(1,4);
+  const reversed=last3.split("").reverse().join("");
+  const sum=String(digits.reduce((total,digit)=>total+Number(digit),0)).padStart(2,"0");
+  const baseLabel=displayDate(result.date);
+  const numbers=[
+    last3,
+    reversed,
+    first3,
+    mid3,
+    `${digits[0]}${digits[2]}${digits[4]}`,
+    `${digits[4]}${digits[1]}${digits[0]}`,
+    `${digits[0]}${sum}`,
+    `${sum}${digits[4]}`
+  ];
+  return [{
+    key:`auto-cang3-${last3}`,
+    name:`Từ ${baseLabel}: cầu 3 càng ĐB`,
+    numbers:[...new Set(numbers.map(three))],
+    dynamic:"cang3-special"
+  }];
+}
+
 function getPatternContext(yearValue,baseDateValue){
   const year=yearValue||String(new Date().getFullYear());
   const results=stateCache.results
@@ -3036,6 +3449,7 @@ function renderForecastStats(){
   const autoRows=baseResult?buildAutoRowsForBase(baseResult,results,byDate):[];
   const loAuto=autoRows.filter(row=>row.target==="lo").slice(0,6);
   const dbAuto=autoRows.filter(row=>row.target==="db").slice(0,6);
+  const cang3Auto=autoRows.filter(row=>row.target==="cang3").slice(0,6);
   const allocation=buildReferenceAllocation(autoRows,$("#referenceMode").value);
   allocation.forecastDate=baseResult?addDate(baseResult.date,1):"";
   const nextResult=baseResult?stateCache.resultsByDate.get(allocation.forecastDate):null;
@@ -3044,6 +3458,7 @@ function renderForecastStats(){
   allocation.signal=referenceSignal(allocation);
   const loReference=allocation.lo;
   const dbReference=allocation.de;
+  const cang3Reference=allocation.cang3||[];
   const lawNumbers=buildLawReferenceNumbers(rows);
   const historyTotal=rows[0]?.total||0;
   $("#forecastStats").innerHTML=`
@@ -3053,7 +3468,7 @@ function renderForecastStats(){
       <div class="stat-card">Mẫu quá khứ<strong>${historyTotal}</strong><small>Chỉ dùng các ngày trước ngày so sánh</small></div>
     </div>
     <p class="muted">Các quy luật dưới đây chỉ là thống kê tham khảo từ dữ liệu đã nhập, không đảm bảo kết quả tương lai.</p>
-    ${renderReferenceNumbers(loReference,dbReference,allocation)}
+    ${renderReferenceNumbers(loReference,dbReference,cang3Reference,allocation)}
     <div class="pattern-grid auto-pattern-grid">
       <div>
         <h3>Máy gợi ý lô${baseResult?` từ ${displayDate(baseResult.date)}`:""}</h3>
@@ -3062,6 +3477,10 @@ function renderForecastStats(){
       <div>
         <h3>Máy gợi ý ĐB${baseResult?` từ ${displayDate(baseResult.date)}`:""}</h3>
         ${dbAuto.length?renderAutoPatternList(dbAuto):'<p class="muted">Chưa đủ mẫu để tự dò ĐB.</p>'}
+      </div>
+      <div>
+        <h3>Máy gợi ý 3 càng${baseResult?` từ ${displayDate(baseResult.date)}`:""}</h3>
+        ${cang3Auto.length?renderAutoPatternList(cang3Auto):'<p class="muted">Chưa đủ mẫu để tự dò 3 càng.</p>'}
       </div>
     </div>
     <div class="pattern-grid">
@@ -3097,7 +3516,7 @@ function renderPatternStats(){
       <div class="stat-card">Mẫu quá khứ<strong>${historyTotal}</strong><small>Chỉ dùng các ngày trước ngày so sánh</small></div>
     </div>
     <p class="muted">Bảng này dùng riêng các quy luật tỷ lệ cao để tạo dãy số và phân bổ điểm.</p>
-    ${renderReferenceNumbers(allocation.lo,allocation.de,allocation)}
+    ${renderReferenceNumbers(allocation.lo,allocation.de,allocation.cang3||[],allocation)}
     <div class="pattern-grid">
       <div>
         ${renderLawReferenceNumbers(lawNumbers)}
@@ -3119,11 +3538,14 @@ function buildAutoRowsForBase(baseResult,results,byDate){
   const key=`${baseResult.date}|${resultScopeKey(results)}`;
   if(autoRowsCache.has(key))return autoRowsCache.get(key);
   const history=results.filter(r=>r.date<baseResult.date).slice(-AUTO_HISTORY_LIMIT);
-  const rows=autoCandidateRules(baseResult)
-    .flatMap(rule=>[
+  const baseRows=autoCandidateRules(baseResult).flatMap(rule=>[
       evaluateAutoPatternRule({...rule,target:"lo"},history,byDate,baseResult.date),
       evaluateAutoPatternRule({...rule,target:"db"},history,byDate,baseResult.date)
-    ])
+    ]);
+  const cang3Rows=cang3CandidateRules(baseResult).map(cangRule=>
+    evaluateAutoPatternRule({...cangRule,target:"cang3"},history,byDate,baseResult.date)
+  );
+  const rows=[...baseRows,...cang3Rows]
     .filter(row=>row.total>=20&&row.hit>0&&row.score>0)
     .sort((a,b)=>b.score-a.score||b.rate-a.rate||b.hit-a.hit);
   autoRowsCache.set(key,rows);
@@ -3228,9 +3650,9 @@ function buildLawMonthBacktest(month,results,byDate,mode){
   });
   const total=rows.reduce((sum,row)=>{
     sum.cost+=row.perf.cost; sum.reward+=row.perf.reward; sum.net+=row.perf.net;
-    sum.loHits+=row.perf.loHits; sum.deHits+=row.perf.deHits;
+    sum.loHits+=row.perf.loHits; sum.deHits+=row.perf.deHits; sum.cang3Hits+=row.perf.cang3Hits||0;
     return sum;
-  },{cost:0,reward:0,net:0,loHits:0,deHits:0});
+  },{cost:0,reward:0,net:0,loHits:0,deHits:0,cang3Hits:0});
   const backtest={month,rows,total};
   lawMonthBacktestCache.set(cacheKey,backtest);
   return backtest;
@@ -3238,6 +3660,23 @@ function buildLawMonthBacktest(month,results,byDate,mode){
 
 function dynamicRuleNumbers(rule,result){
   const db=two(result.special);
+  if(rule.dynamic==="cang3-special"){
+    const special=String(result.special||"").replace(/\D/g,"").padStart(5,"0").slice(-5);
+    if(!special)return [];
+    const digits=special.split("");
+    const last3=three(special);
+    const sum=String(digits.reduce((total,digit)=>total+Number(digit),0)).padStart(2,"0");
+    return [
+      last3,
+      last3.split("").reverse().join(""),
+      special.slice(0,3),
+      special.slice(1,4),
+      `${digits[0]}${digits[2]}${digits[4]}`,
+      `${digits[4]}${digits[1]}${digits[0]}`,
+      `${digits[0]}${sum}`,
+      `${sum}${digits[4]}`
+    ].map(three);
+  }
   if(rule.dynamic==="db-prev")return [db];
   if(rule.dynamic==="db-reverse")return [reverse2(db)];
   if(rule.dynamic==="db-complement-100")return [complement100(db)];
@@ -3261,11 +3700,12 @@ function evaluateAutoPatternRule(rule,results,byDate,baseDate){
   let total=0,hit=0;
   const recent=[];
   results.filter(r=>r.date<baseDate).forEach(result=>{
-    const nums=[...new Set(dynamicRuleNumbers(rule,result).map(two))];
+    const nums=[...new Set(dynamicRuleNumbers(rule,result).map(rule.target==="cang3"?three:two))];
     if(!nums.length)return;
     const next=byDate.get(addDate(result.date,1));
     if(!next)return;
-    const nextNumbers=rule.target==="db"?new Set([two(next.special)]):new Set(lotoNumbers(next));
+    const nextNumbers=rule.target==="db"?new Set([two(next.special)]):
+      rule.target==="cang3"?new Set([three(next.special)]):new Set(lotoNumbers(next));
     const hitNumbers=nums.filter(n=>nextNumbers.has(n));
     total++;
     if(hitNumbers.length){
@@ -3275,8 +3715,10 @@ function evaluateAutoPatternRule(rule,results,byDate,baseDate){
   });
   const rate=total?hit/total:0;
   const suggested=rule.numbers.slice(0,30);
-  const chanceCount=Math.min(rule.numbers.length||1,100);
-  const baseline=rule.target==="db"?chanceCount/100:1-Math.pow(1-chanceCount/100,27);
+  const chanceLimit=rule.target==="cang3"?1000:100;
+  const chanceCount=Math.min(rule.numbers.length||1,chanceLimit);
+  const baseline=rule.target==="db"?chanceCount/100:
+    rule.target==="cang3"?chanceCount/1000:1-Math.pow(1-chanceCount/100,27);
   const score=(rate-baseline)*Math.log10(total+1);
   return {...rule,total,hit,rate,score,recent,numbers:suggested};
 }
@@ -3303,31 +3745,36 @@ function collectReferenceCandidates(rules,limit,type){
 function buildReferenceAllocation(autoRows,mode){
   const loRules=autoRows.filter(row=>row.target==="lo");
   const deRules=autoRows.filter(row=>row.target==="db");
-  const confidence=referenceConfidence([...loRules,...deRules]);
+  const cang3Rules=autoRows.filter(row=>row.target==="cang3");
+  const confidence=referenceConfidence([...loRules,...deRules,...cang3Rules]);
   const strong=mode==="strong";
   const weak=confidence<0.14;
   const veryWeak=confidence<0.08;
   const target=strong?(veryWeak?180:weak?520:920):(veryWeak?120:weak?260:420);
-  const loBudget=Math.round(target*(strong?0.56:0.52));
-  const deBudget=target-loBudget;
+  const cang3Budget=Math.round(target*(strong?0.16:0.12));
+  const loBudget=Math.round((target-cang3Budget)*(strong?0.56:0.52));
+  const deBudget=target-cang3Budget-loBudget;
   const loCandidates=collectReferenceCandidates(loRules,strong?14:7,"lo").filter(x=>x.score>=0.05||x.count>1);
   const deCandidates=collectReferenceCandidates(deRules,strong?10:5,"de").filter(x=>x.score>=0.035||x.count>1);
+  const cang3Candidates=collectReferenceCandidates(cang3Rules,strong?8:5,"cang3").filter(x=>x.score>=0.004||x.count>0);
   const lo=veryWeak?[]:applyStakeBudget(loCandidates.slice(0,strong?8:4),"lo",loBudget);
   const de=veryWeak?applyStakeBudget(deCandidates.slice(0,2),"de",deBudget):applyStakeBudget(deCandidates.slice(0,strong?5:3),"de",deBudget);
+  const cang3=applyStakeBudget(cang3Candidates.slice(0,strong?4:2),"cang3",veryWeak?Math.round(cang3Budget*0.5):cang3Budget);
   return {
     lo,
     de,
-    pool:referencePool(loCandidates,deCandidates),
+    cang3,
+    pool:referencePool(loCandidates,deCandidates,cang3Candidates),
     confidence,
     mode:`${strong?"Kết mạnh":"Đánh vui"}${veryWeak?" · nên bỏ":weak?" · tín hiệu yếu":""}`,
     target,
-    totalCost:referenceCost(lo,"lo")+referenceCost(de,"de")
+    totalCost:referenceCost(lo,"lo")+referenceCost(de,"de")+referenceCost(cang3,"cang3")
   };
 }
 
-function referencePool(loCandidates,deCandidates){
+function referencePool(loCandidates,deCandidates,cang3Candidates=[]){
   const map=new Map();
-  [...loCandidates,...deCandidates].forEach(item=>{
+  [...loCandidates,...deCandidates,...cang3Candidates].forEach(item=>{
     const current=map.get(item.number)||{number:item.number,score:0,count:0};
     current.score+=item.score;
     current.count+=item.count||1;
@@ -3358,8 +3805,9 @@ function buildReferenceMonthBacktest(month,results,byDate,mode){
     sum.net+=row.perf.net;
     sum.loHits+=row.perf.loHits;
     sum.deHits+=row.perf.deHits;
+    sum.cang3Hits+=row.perf.cang3Hits||0;
     return sum;
-  },{cost:0,reward:0,net:0,loHits:0,deHits:0});
+  },{cost:0,reward:0,net:0,loHits:0,deHits:0,cang3Hits:0});
   const backtest={month,rows,total};
   monthBacktestCache.set(cacheKey,backtest);
   return backtest;
@@ -3368,8 +3816,9 @@ function buildReferenceMonthBacktest(month,results,byDate,mode){
 function evaluateReferencePerformance(allocation,nextResult){
   const nextLoto=lotoNumbers(nextResult);
   const nextSpecial=two(nextResult.special);
+  const nextCang3=three(nextResult.special);
   const rows=[];
-  let cost=0,reward=0,loHits=0,deHits=0;
+  let cost=0,reward=0,loHits=0,deHits=0,cang3Hits=0;
   allocation.lo.forEach(pick=>{
     const hits=nextLoto.filter(n=>n===pick.number).length;
     const rowCost=pick.stake*23;
@@ -3384,7 +3833,14 @@ function evaluateReferencePerformance(allocation,nextResult){
     cost+=rowCost; reward+=rowReward; deHits+=hit;
     if(hit)rows.push(`Đề ${pick.number}`);
   });
-  return {date:nextResult.date,cost,reward,net:reward-cost,loHits,deHits,hits:rows};
+  (allocation.cang3||[]).forEach(pick=>{
+    const hit=nextCang3===three(pick.number)?1:0;
+    const rowCost=pick.stake;
+    const rowReward=hit*pick.stake*400;
+    cost+=rowCost; reward+=rowReward; cang3Hits+=hit;
+    if(hit)rows.push(`3 càng ${pick.number}`);
+  });
+  return {date:nextResult.date,cost,reward,net:reward-cost,loHits,deHits,cang3Hits,hits:rows};
 }
 
 function referenceSignal(allocation){
@@ -3416,14 +3872,18 @@ function applyStakeBudget(candidates,type,budget){
   const picks=[];
   let spent=0;
   const unit=type==="lo"?23:1;
-  const strong=budget>(type==="lo"?350:250);
-  const tiers=type==="de"?(strong?[60,40,30,20,10]:[40,30,20,10]):(strong?[10,7,5,3,2,1]:[6,4,3,2,1]);
-  const maxByRank=type==="de"?(strong?[120,90,70,50,30,20,10]:[70,50,30,20,10]):(strong?[16,12,9,6,4,3,2,1]:[9,6,4,3,2,1]);
+  const strong=budget>(type==="lo"?350:type==="cang3"?90:250);
+  const tiers=type==="de"?(strong?[60,40,30,20,10]:[40,30,20,10]):
+    type==="cang3"?(strong?[30,20,10,10]:[20,10]):
+    (strong?[10,7,5,3,2,1]:[6,4,3,2,1]);
+  const maxByRank=type==="de"?(strong?[120,90,70,50,30,20,10]:[70,50,30,20,10]):
+    type==="cang3"?(strong?[60,40,30,20]:[30,20,10]):
+    (strong?[16,12,9,6,4,3,2,1]:[9,6,4,3,2,1]);
   candidates.forEach((candidate,index)=>{
     let stake=tiers[Math.min(index,tiers.length-1)];
-    if(type==="de"&&stake<10)stake=10;
-    while(stake>0&&spent+stake*unit>budget)stake-=type==="de"?10:1;
-    if(type==="de"&&stake<10)return;
+    if((type==="de"||type==="cang3")&&stake<10)stake=10;
+    while(stake>0&&spent+stake*unit>budget)stake-=type==="lo"?1:10;
+    if((type==="de"||type==="cang3")&&stake<10)return;
     if(type==="lo"&&stake<1)return;
     picks.push({...candidate,stake});
     spent+=stake*unit;
@@ -3432,7 +3892,7 @@ function applyStakeBudget(candidates,type,budget){
     let changed=false;
     for(let i=0;i<picks.length;i++){
       const pick=picks[i];
-      const step=type==="de"?10:1;
+      const step=type==="lo"?1:10;
       const maxStake=maxByRank[Math.min(i,maxByRank.length-1)];
       if(pick.stake+step>maxStake)continue;
       if(spent+step*unit>budget)continue;
@@ -3458,23 +3918,25 @@ function referenceCopyText(picks,type){
   });
   return [...groups.entries()]
     .sort((a,b)=>b[0]-a[0])
-    .map(([stake,numbers])=>`${numbers.join("-")} ${stake}${type==="de"?"k":"đ"}`)
+    .map(([stake,numbers])=>`${numbers.join("-")} ${stake}${entryTypeSuffix(type)}`)
     .join("\n");
 }
 
-function combinedReferenceCopyText(loPicks,dePicks){
+function combinedReferenceCopyText(loPicks,dePicks,cang3Picks=[]){
   const lo=referenceCopyText(loPicks,"lo");
   const de=referenceCopyText(dePicks,"de");
-  return [lo&&`Lô:\n${lo}`,de&&`Đề:\n${de}`].filter(Boolean).join("\n");
+  const cang3=referenceCopyText(cang3Picks,"cang3");
+  return [lo&&`Lô:\n${lo}`,de&&`Đề:\n${de}`,cang3&&`3 càng:\n${cang3}`].filter(Boolean).join("\n");
 }
 
-function renderReferenceNumbers(loPicks,dbPicks,allocation){
-  if(!loPicks.length&&!dbPicks.length&&!allocation.pool?.length&&!allocation.monthly)return "";
+function renderReferenceNumbers(loPicks,dbPicks,cang3Picks,allocation){
+  if(!loPicks.length&&!dbPicks.length&&!cang3Picks.length&&!allocation.pool?.length&&!allocation.monthly)return "";
+  const copyText=combinedReferenceCopyText(loPicks,dbPicks,cang3Picks);
   return `<div class="reference-box">
     <div class="reference-head">
       <h3>Phân bổ điểm tham khảo</h3>
       <div class="reference-head-actions"><small>${allocation.mode} · mục tiêu ${allocation.target} · đang trừ ${allocation.totalCost}</small>
-        <button class="secondary" type="button" data-text="${esc(combinedReferenceCopyText(loPicks,dbPicks))}" onclick="copyReferenceText(this.dataset.text)">Copy cả lô + đề</button>
+        <button class="secondary" type="button" data-text="${esc(copyText)}" onclick="copyReferenceText(this.dataset.text)">Copy cả lô + đề + 3 càng</button>
       </div>
     </div>
     ${renderReferenceSignal(allocation.signal)}
@@ -3482,11 +3944,12 @@ function renderReferenceNumbers(loPicks,dbPicks,allocation){
     ${renderReferencePerformance(allocation.performance)}
     <div class="allocation-toolbar">
       <strong>${allocation.mode} · mục tiêu ${allocation.target} · đang trừ ${allocation.totalCost}</strong>
-      <button class="secondary" type="button" data-text="${esc(combinedReferenceCopyText(loPicks,dbPicks))}" onclick="copyReferenceText(this.dataset.text)">Copy cả lô + đề</button>
+      <button class="secondary" type="button" data-text="${esc(copyText)}" onclick="copyReferenceText(this.dataset.text)">Copy cả lô + đề + 3 càng</button>
     </div>
     <div class="reference-grid">
       ${renderReferenceGroup("Lô tham khảo",loPicks,"lo")}
       ${renderReferenceGroup("Đề tham khảo",dbPicks,"de")}
+      ${renderReferenceGroup("3 càng tham khảo",cang3Picks,"cang3")}
     </div>
     ${renderReferenceMonthBacktest(allocation.monthly)}
   </div>`;
@@ -3540,6 +4003,7 @@ function renderReferenceMonthBacktest(backtest){
       <span>Cộng: <strong>${backtest.total.reward}</strong></span>
       <span>Lô trúng: <strong>${backtest.total.loHits}</strong></span>
       <span>Đề trúng: <strong>${backtest.total.deHits}</strong></span>
+      <span>3 càng trúng: <strong>${backtest.total.cang3Hits||0}</strong></span>
     </div>
     <div class="table-wrap compact-table">
       <table>
@@ -3561,22 +4025,22 @@ function renderReferenceGroup(title,picks,type,editable=false){
   const text=referenceCopyText(picks,type);
   const cost=referenceCost(picks,type);
   const top=picks[0];
-  const bestNet=top?top.stake*80-cost:0;
+  const bestNet=top?top.stake*(type==="cang3"?400:80)-cost:0;
   return `<div class="reference-group"${editable?` data-allocation-type="${type}"`:""}>
     <div class="reference-title">
       <strong>${title}</strong>
     </div>
     <div class="reference-metrics">
-      <span>${type==="lo"?"Điểm trừ tối đa":"Vốn đề"}: <strong data-allocation-cost>${cost}</strong></span>
+      <span>${type==="lo"?"Điểm trừ tối đa":type==="cang3"?"Vốn 3 càng":"Vốn đề"}: <strong data-allocation-cost>${cost}</strong></span>
       ${top?`<span>Trúng top 1: <strong data-allocation-net class="${bestNet>=0?'positive':'negative'}">${bestNet>=0?'+':''}${bestNet}</strong></span>`:""}
     </div>
     <div class="reference-numbers ${type}">${picks.length?picks.map((p,index)=>`
       <span class="${editable?'editable-stake':''}"${editable?` data-number="${p.number}"`:""} title="Tỷ lệ tốt nhất ${Math.round(p.bestRate*100)}%, xuất hiện trong ${p.count} rule">
         ${p.number}${editable?`<span class="stake-stepper">
           <button type="button" aria-label="Giảm điểm số ${p.number}" data-stake-action="minus">−</button>
-          <input type="number" min="0" step="${type==="de"?10:1}" value="${p.stake}" data-stake-input data-top="${index===0?'1':'0'}" aria-label="Điểm phân bổ cho số ${p.number}">
+          <input type="number" min="0" step="${type==="lo"?1:10}" value="${p.stake}" data-stake-input data-top="${index===0?'1':'0'}" aria-label="Điểm phân bổ cho số ${p.number}">
           <button type="button" aria-label="Tăng điểm số ${p.number}" data-stake-action="plus">+</button>
-        </span>`:`<small>${p.stake}${type==="de"?"k":"đ"}</small>`}
+        </span>`:`<small>${p.stake}${entryTypeSuffix(type)}</small>`}
       </span>`).join(""):'<em>Chưa đủ dữ liệu</em>'}</div>
     ${picks.length?`<small${editable?' data-allocation-summary':''}>${esc(text).replace(/\n/g,"<br>")}</small>`:""}
   </div>`;
@@ -3591,7 +4055,7 @@ function updateManualAllocation(group){
   });
   const cost=inputs.reduce((sum,input)=>sum+Number(input.value),0)*(type==="lo"?23:1);
   const topStake=Number(inputs.find(input=>input.dataset.top==="1")?.value)||0;
-  const net=topStake*80-cost;
+  const net=topStake*(type==="cang3"?400:80)-cost;
   group.querySelector("[data-allocation-cost]").textContent=String(cost);
   const netNode=group.querySelector("[data-allocation-net]");
   if(netNode){
@@ -3600,7 +4064,7 @@ function updateManualAllocation(group){
   }
   const summary=group.querySelector("[data-allocation-summary]");
   const copyText=inputs.filter(input=>Number(input.value)>0)
-    .map(input=>`${input.closest(".editable-stake").dataset.number} ${input.value}${type==="de"?"k":"đ"}`);
+    .map(input=>`${input.closest(".editable-stake").dataset.number} ${input.value}${entryTypeSuffix(type)}`);
   if(summary){
     summary.innerHTML=copyText.join("<br>")||"Chưa phân bổ điểm";
   }
@@ -3608,9 +4072,9 @@ function updateManualAllocation(group){
   if(allButton){
     const groups=[...document.querySelectorAll("#analyzeNumbersResult [data-allocation-type]")];
     allButton.dataset.text=groups.map(item=>{
-      const label=item.dataset.allocationType==="lo"?"Lô":"Đề";
+      const label=entryTypeLabel(item.dataset.allocationType);
       const lines=[...item.querySelectorAll("[data-stake-input]")].filter(node=>Number(node.value)>0)
-        .map(node=>`${node.closest(".editable-stake").dataset.number} ${node.value}${item.dataset.allocationType==="de"?"k":"đ"}`);
+        .map(node=>`${node.closest(".editable-stake").dataset.number} ${node.value}${entryTypeSuffix(item.dataset.allocationType)}`);
       return lines.length?`${label}:\n${lines.join("\n")}`:"";
     }).filter(Boolean).join("\n");
   }
@@ -3795,16 +4259,16 @@ function buildPredictionSummaryRows(entries){
     grouped.get(key).push(entry);
   });
   [...grouped.values()]
-    .sort((a,b)=>(a[0].type==="lo"?0:1)-(b[0].type==="lo"?0:1)||b[0].points-a[0].points)
+    .sort((a,b)=>entryTypeOrder(a[0].type)-entryTypeOrder(b[0].type)||b[0].points-a[0].points)
     .forEach(group=>{
       const numbers=[...new Set(group.map(e=>e.number))].sort().join(" - ");
       rows.push(buildPredictionLineRow(group[0].type,numbers,group[0].points,false,group));
     });
-  return rows.sort((a,b)=>(a.type==="lo"?0:1)-(b.type==="lo"?0:1)||b.points-a.points);
+  return rows.sort((a,b)=>entryTypeOrder(a.type)-entryTypeOrder(b.type)||b.points-a.points);
 }
 
 function buildPredictionLineRow(type,numbers,points,isBatch,entries){
-  const suffix=type==="lo"?"đ":"k";
+  const suffix=entryTypeSuffix(type);
   const total=aggregate(entries);
   const pending=total.pending>0;
   const net=pending?null:total.reward-total.cost;
@@ -3812,7 +4276,7 @@ function buildPredictionLineRow(type,numbers,points,isBatch,entries){
     type,
     numbers,
     points,
-    copy:`${type==="lo"?"L":"Đ"}: ${numbers} - ${points}${suffix}`,
+    copy:`${entryTypeShort(type)}: ${numbers} - ${points}${suffix}`,
     cost:total.cost,
     reward:total.reward,
     net,
@@ -3823,11 +4287,11 @@ function buildPredictionLineRow(type,numbers,points,isBatch,entries){
 }
 
 function renderPredictionSummaryGroups(rows){
-  return ["lo","de"].map(type=>{
+  return ENTRY_TYPES.map(type=>{
     const group=rows.filter(row=>row.type===type);
     if(!group.length)return "";
     return `<div class="prediction-kind">
-      <h4>${type==="lo"?"Lô":"Đề"}</h4>
+      <h4>${entryTypeLabel(type)}</h4>
       ${group.map(renderPredictionSummaryLine).join("")}
     </div>`;
   }).join("");

@@ -37,7 +37,7 @@
 <main>
   <section class="notice hidden">
     <strong>Luật điểm:</strong>
-    Lô: trừ 23, trúng +80 mỗi điểm. Đề: trúng +80 lần điểm ghi.
+    Lô: trừ 23, trúng +80 mỗi điểm. Đề: trúng +80 lần điểm ghi. 3 càng: trúng +400 lần điểm ghi.
   </section>
 
   <section id="tab-predict" class="tab-panel active">
@@ -51,12 +51,13 @@
             <select id="entryType">
               <option value="lo">Lô</option>
               <option value="de">Đề</option>
+              <option value="cang3">3 càng</option>
             </select>
           </label>
         </div>
         <div class="quick-entry">
           <label>Dãy số và điểm
-            <textarea id="quickEntryText" rows="4" placeholder="62-13 3đ&#10;76-97-50 30k&#10;Đầu 4, 20k&#10;Đầu 2 -7 10k"></textarea>
+            <textarea id="quickEntryText" rows="4" placeholder="62-13 3đ&#10;76-97-50 30k&#10;262 30k&#10;Đầu 4, 20k"></textarea>
           </label>
           <div class="inline">
             <button id="quickCalcBtn" type="button" class="secondary">Tính tổng</button>
@@ -90,17 +91,28 @@
     </nav>
 
     <section id="stats-results" class="subtab-panel active">
-      <div class="grid two">
-        <article class="card">
-          <div class="section-head">
-            <h2>Theo ngày</h2>
-            <select id="resultSelect" aria-label="Chọn ngày kết quả"></select>
+      <div class="grid result-overview">
+        <article class="card result-main-card">
+          <div class="section-head result-section-head">
+            <div class="result-title-controls">
+              <h2>Theo ngày</h2>
+              <select id="resultSelect" aria-label="Chọn ngày kết quả"></select>
+            </div>
+            <div class="inline result-day-controls">
+              <label>Xem Bảng
+                <select id="resultBoardRange">
+                  <option value="7">7 ngày</option>
+                  <option value="14">14 ngày</option>
+                  <option value="28">28 ngày</option>
+                </select>
+              </label>
+            </div>
           </div>
           <div id="resultPreview"></div>
         </article>
 
-        <article class="card">
-          <h2>Đầu/đuôi</h2>
+        <article class="card head-loto-card">
+          <h2>Đầu lô</h2>
           <div id="headStats"></div>
         </article>
       </div>
@@ -160,6 +172,22 @@
       <section class="card">
         <div class="section-head">
           <h2>Cầu Đặc biệt</h2>
+          <label>Cách đánh
+            <select id="dbBridgeReferenceMode">
+              <option value="fun">Đánh vui</option>
+              <option value="strong">Kết mạnh</option>
+            </select>
+          </label>
+          <label>Tháng quy chiếu
+            <input id="dbBridgeBacktestMonth" type="month">
+          </label>
+          <label>Rà 3 càng
+            <select id="dbBridgeCang3Years">
+              <option value="1">1 năm</option>
+              <option value="2">2 năm</option>
+              <option value="3" selected>3 năm</option>
+            </select>
+          </label>
           <label>Ngày soi
             <input id="dbBridgeBaseDate" type="date">
           </label>
@@ -245,7 +273,7 @@
           <thead>
           <tr>
             <th>Ngày</th><th>Tổng số đánh</th><th>Tổng điểm dự đoán</th>
-            <th>Số lô đúng</th><th>Số đề đúng</th><th>Điểm trừ</th>
+            <th>Số lô đúng</th><th>Số đề đúng</th><th>3 càng đúng</th><th>Điểm trừ</th>
             <th>Điểm cộng</th><th>Chênh lệch</th><th>Xóa</th>
           </tr>
           </thead>
